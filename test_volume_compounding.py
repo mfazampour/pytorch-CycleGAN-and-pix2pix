@@ -29,6 +29,12 @@ class VolumeTestOptions(BaseOptions):
         parser.add_argument('--eval', action='store_true', help='use eval mode during test time.')
         parser.add_argument('--num_test', type=int, default=50, help='how many test images to run')
         parser.add_argument('--plot_result', type=bool, default=False, help='flag to plot the images when running')
+        parser.add_argument('--num_of_channels', type=int, default=1,
+                            help='number of channels expected in the output image. '
+                                 'if the output image of network has more than one channel, in compounding,'
+                                 ' average over the channels in z direction should be calculated.'
+                                 'should be an odd number')
+
         # rewrite devalue values
         parser.set_defaults(model='test')
         # To avoid cropping, the load_size should be the same as crop_size
@@ -45,6 +51,18 @@ def compound_volume(slices, opt):
     vol = sitk.GetImageFromArray(resized)
     vol.SetSpacing(opt.res)
     sitk.WriteImage(vol, opt.results_dir + 'fake.mhd')
+
+
+def slices_from_multichannel(fake_slices, opt):
+    averaged_slices = []
+    for i in range(len(fake_slices)):
+        fake_single_slice = []
+        start_idx = int(np.max([0, i - (opt.num_of_channels - 1) / 2]))
+        end_idx = int(np.min([len(fake_slices), i + (opt.num_of_channels + 1) / 2]))
+        for idx in range(start_idx, end_idx):
+            fake_single_slice.append(fake_slices[idx][:, :, i - start_idx])
+        averaged_slices.append(np.mean(np.stack(fake_single_slice, axis=2), axis=2))
+    return averaged_slices
 
 
 if __name__ == '__main__':
@@ -71,6 +89,8 @@ if __name__ == '__main__':
     if opt.eval:
         model.eval()
 
+    assert np.mod(opt.num_of_channels, 2) == 1, "num of channels should be an odd number, for simplicity"
+
     fake_slices = []
     for i, data in enumerate(dataset):
         if i >= opt.num_test:  # only apply our model to opt.num_test images.
@@ -80,15 +100,20 @@ if __name__ == '__main__':
         visuals = model.get_current_visuals()  # get image results
         fake = visuals['fake_B'].cpu().squeeze().numpy()
         fake = np.transpose(fake, axes=[1, 2, 0])
-        fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
-        if opt.plot_result:
-            plt.imshow(fake, cmap='gray')
-            plt.title(f'show image at index {i}')
-            plt.show()
-        fake_slices.append(fake)
+        if opt.num_of_channels == 1:
+            if opt.plot_result:
+                plt.imshow(fake, cmap='gray')
+                plt.title(f'show image at index {i}')
+                plt.show()
+            fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
+            fake_slices.append(fake)
+        else:
+            fake_slices.append(fake)
         img_path = model.get_image_paths()  # get image paths
         if i % 5 == 0:  # save images to an HTML file
             print('processing (%04d)-th image... %s' % (i, img_path))
         save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
+    if opt.num_of_channels:
+        fake_slices = slices_from_multichannel(fake_slices, opt)
     compound_volume(fake_slices, opt)
     webpage.save()  # save the HTML
