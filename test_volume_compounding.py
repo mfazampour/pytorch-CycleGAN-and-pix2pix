@@ -1,14 +1,17 @@
 import os
-from options.base_options import BaseOptions
-from data import create_dataset
-from models import create_model
-from util.visualizer import save_images
-from util import html
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 from PIL import Image
+
+
+from options.base_options import BaseOptions
+from data import create_dataset
+from models import create_model
+from models.pix2pix_model import Pix2PixModel
+from util.visualizer import save_images
+from util import html
 
 
 class VolumeTestOptions(BaseOptions):
@@ -27,13 +30,14 @@ class VolumeTestOptions(BaseOptions):
         parser.add_argument('--phase', type=str, default='test', help='train, val, test, etc')
         # Dropout and Batchnorm has different behavioir during training and test.
         parser.add_argument('--eval', action='store_true', help='use eval mode during test time.')
-        parser.add_argument('--num_test', type=int, default=50, help='how many test images to run')
+        parser.add_argument('--num_test', type=int, default=100, help='how many test images to run')
         parser.add_argument('--plot_result', type=bool, default=False, help='flag to plot the images when running')
         parser.add_argument('--num_of_channels', type=int, default=1,
                             help='number of channels expected in the output image. '
                                  'if the output image of network has more than one channel, in compounding,'
                                  ' average over the channels in z direction should be calculated.'
                                  'should be an odd number')
+        parser.add_argument('--patients_dir', type=str, default='./datasets/patients', help='source folder of patients')
 
         # rewrite devalue values
         parser.set_defaults(model='test')
@@ -43,14 +47,14 @@ class VolumeTestOptions(BaseOptions):
         return parser
 
 
-def compound_volume(slices, opt):
+def compound_volume(slices, opt, patient_name:str):
     resized = []
     for slice_ in slices:
         resized.append(Image.fromarray(slice_).resize(opt.orig_size, Image.ANTIALIAS))
     resized = np.stack(resized, axis=0)
     vol = sitk.GetImageFromArray(resized)
     vol.SetSpacing(opt.res)
-    sitk.WriteImage(vol, opt.results_dir + 'fake.mhd')
+    sitk.WriteImage(vol, opt.results_dir + f'fake_{patient_name}.mhd')
 
 
 def slices_from_multichannel(fake_slices, opt):
@@ -61,8 +65,46 @@ def slices_from_multichannel(fake_slices, opt):
         end_idx = int(np.min([len(fake_slices), i + (opt.num_of_channels + 1) / 2]))
         for idx in range(start_idx, end_idx):
             fake_single_slice.append(fake_slices[idx][:, :, i - start_idx])
-        averaged_slices.append(np.mean(np.stack(fake_single_slice, axis=2), axis=2))
+        # averaged_slices.append(np.mean(np.stack(fake_single_slice, axis=2), axis=2))
+        averaged_slices.append(np.median(np.stack(fake_single_slice, axis=2), axis=2))
     return averaged_slices
+
+
+def patient_fake_compound(dataset, patient_name: str):
+
+    fake_slices = []
+    for i, data in enumerate(dataset):
+        if i >= opt.num_test:  # only apply our model to opt.num_test images.
+            break
+        model.set_input(data)  # unpack data from data loader
+        model.test()  # run inference
+        visuals = model.get_current_visuals()  # get image results
+        try:
+            fake = visuals['fake_B'].cpu().squeeze().numpy()
+            fake_volume = fake
+        except KeyError:
+            fake = visuals['fake_B_center'].cpu().squeeze(dim=0).numpy()
+            if isinstance(model, Pix2PixModel):
+                fake_volume = model.fake_B.cpu().squeeze(dim=0).numpy()
+                fake_volume = np.transpose(fake_volume, axes=(1, 2, 0))
+        fake = np.transpose(fake, axes=[1, 2, 0])
+        if opt.num_of_channels == 1:
+            if opt.plot_result:
+                plt.imshow(fake, cmap='gray')
+                plt.title(f'show image at index {i}')
+                plt.show()
+            fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
+            fake_slices.append(fake)
+        else:
+            fake_slices.append(fake_volume)
+        img_path = model.get_image_paths()  # get image paths
+        if i % 5 == 0:  # save images to an HTML file
+            print('processing (%04d)-th image... %s' % (i, img_path))
+        save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
+    if opt.num_of_channels:
+        fake_slices = slices_from_multichannel(fake_slices, opt)
+    compound_volume(fake_slices, opt, patient_name)
+    webpage.save()  # save the HTML
 
 
 if __name__ == '__main__':
@@ -73,7 +115,6 @@ if __name__ == '__main__':
     opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
     opt.no_flip = True  # no flip; comment this line if results on flipped images are needed.
     opt.display_id = -1  # no visdom display; the test code saves the results to a HTML file.
-    dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     model = create_model(opt)  # create a model given opt.model and other options
     model.setup(opt)  # regular setup: load and print networks; create schedulers
     # create a website
@@ -89,31 +130,11 @@ if __name__ == '__main__':
     if opt.eval:
         model.eval()
 
-    assert np.mod(opt.num_of_channels, 2) == 1, "num of channels should be an odd number, for simplicity"
+    assert np.mod(opt.num_of_channels, 2) == 1, "num of channels should be an odd number, (for simplicity)"
 
-    fake_slices = []
-    for i, data in enumerate(dataset):
-        if i >= opt.num_test:  # only apply our model to opt.num_test images.
-            break
-        model.set_input(data)  # unpack data from data loader
-        model.test()  # run inference
-        visuals = model.get_current_visuals()  # get image results
-        fake = visuals['fake_B'].cpu().squeeze().numpy()
-        fake = np.transpose(fake, axes=[1, 2, 0])
-        if opt.num_of_channels == 1:
-            if opt.plot_result:
-                plt.imshow(fake, cmap='gray')
-                plt.title(f'show image at index {i}')
-                plt.show()
-            fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
-            fake_slices.append(fake)
-        else:
-            fake_slices.append(fake)
-        img_path = model.get_image_paths()  # get image paths
-        if i % 5 == 0:  # save images to an HTML file
-            print('processing (%04d)-th image... %s' % (i, img_path))
-        save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
-    if opt.num_of_channels:
-        fake_slices = slices_from_multichannel(fake_slices, opt)
-    compound_volume(fake_slices, opt)
-    webpage.save()  # save the HTML
+    for root, dirs, files in os.walk(opt.patients_dir):
+        if 'test' in dirs:
+            patient_name = root.split('/')[-1]
+            opt.dataroot = root
+            dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+            patient_fake_compound(dataset, patient_name)
