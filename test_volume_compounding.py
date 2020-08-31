@@ -50,11 +50,15 @@ class VolumeTestOptions(BaseOptions):
 def compound_volume(slices, opt, patient_name:str):
     resized = []
     for slice_ in slices:
-        resized.append(Image.fromarray(slice_).resize(opt.orig_size, Image.ANTIALIAS))
+        resized.append(Image.fromarray(slice_.squeeze()).resize(opt.orig_size, Image.ANTIALIAS))
     resized = np.stack(resized, axis=0)
     vol = sitk.GetImageFromArray(resized)
     vol.SetSpacing(opt.res)
-    sitk.WriteImage(vol, opt.results_dir + f'fake_{patient_name}.mhd')
+    path = opt.results_dir + f'volumes/fake_{patient_name}.mhd'
+    dir_ = os.path.dirname(path)
+    if not os.path.isdir(dir_):
+        os.makedirs(dir_)
+    sitk.WriteImage(vol, opt.results_dir + f'volumes/fake_{patient_name}.mhd')
 
 
 def slices_from_multichannel(fake_slices, opt):
@@ -69,6 +73,9 @@ def slices_from_multichannel(fake_slices, opt):
         averaged_slices.append(np.median(np.stack(fake_single_slice, axis=2), axis=2))
     return averaged_slices
 
+def save_network_output(fake_volume, opt, idx, patient_name):
+    fake_volume = np.split(fake_volume, fake_volume.shape[2], axis=2)
+    compound_volume(fake_volume, opt, f'{patient_name}/chunk_{idx}')
 
 def patient_fake_compound(dataset, patient_name: str):
 
@@ -96,6 +103,7 @@ def patient_fake_compound(dataset, patient_name: str):
             fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
             fake_slices.append(fake)
         else:
+            save_network_output(fake_volume, opt, patient_name=patient_name, idx=i)
             fake_slices.append(fake_volume)
         img_path = model.get_image_paths()  # get image paths
         if i % 5 == 0:  # save images to an HTML file
