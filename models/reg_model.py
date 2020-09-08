@@ -15,17 +15,25 @@ import transforms3d
 import torchio
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-import tensorflow as tf
-# import torchgeometry
-import numpy as np
-print(tf.__version__)
 
+
+def set_border_value(img: torch.Tensor, value= None):
+    if value is None:
+        value = img.min()
+    img[:, :, 0, :, :] = value
+    img[:, :, -1, :, :] = value
+    img[:, :, :, 0, :] = value
+    img[:, :, :, -1, :] = value
+    img[:, :, :, :, 0] = value
+    img[:, :, :, :, -1] = value
+    return img
 
 def transform_image(img: torch.Tensor, transform, device):
     # img = torch.tensor(img.view(1,1,9,256,256)).to(self.device)
     img = img.unsqueeze(dim=0)
+    # img = set_border_value(img)
     grid = F.affine_grid(transform, img.shape).to(device)
-    x_trans = F.grid_sample(img, grid)
+    x_trans = F.grid_sample(img, grid, padding_mode='border')
     # x_trans = torch.tensor(x_trans.view(1,9,256,256))
     return x_trans.squeeze(dim=0)
 
