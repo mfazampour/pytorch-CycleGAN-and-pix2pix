@@ -1,10 +1,10 @@
-from .pix2pix_model import Pix2PixModel
+from .reg_model import RegModel
 import torch
 from skimage import color  # used for lab2rgb
 import numpy as np
 
 
-class MultiChannelModel(Pix2PixModel):
+class MultiChannelModel(RegModel):
     """This is a subclass of Pix2PixModel for multi-channel images (each channel is actually a neighboring slice).
 
     The model training requires '-dataset_model multichannel' dataset.
@@ -24,7 +24,7 @@ class MultiChannelModel(Pix2PixModel):
         By default, we use 'colorization' dataset for this model.
         See the original pix2pix paper (https://arxiv.org/pdf/1611.07004.pdf) and colorization results (Figure 9 in the paper)
         """
-        Pix2PixModel.modify_commandline_options(parser, is_train)
+        RegModel.modify_commandline_options(parser, is_train)
         parser.set_defaults(dataset_mode='multichannel')
         if is_train:
             parser.add_argument('--lambda_smoothness', type=float, default=100.0,
@@ -43,43 +43,29 @@ class MultiChannelModel(Pix2PixModel):
         we convert the Lab image 'fake_B' (inherited from Pix2pixModel) to a RGB image 'fake_B_rgb'.
         """
         # reuse the pix2pix model
-        Pix2PixModel.__init__(self, opt)
-        # specify the images to be visualized.
-        self.visual_names = ['real_A_avg', 'fake_B_avg', 'real_B_avg', 'smoothness_fake',
-                             'real_A_center', 'fake_B_center', 'real_B_center']
-        self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake', 'G_smoothness']
+        RegModel.__init__(self, opt)
+        self.loss_names = ['G', 'D_real', 'D_fake', 'D']
+        # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
+        self.visual_names = ['real_A', 'real_A_inverted', 'real_B']
         if self.isTrain:
             self.smoothnessL1 = torch.nn.L1Loss()
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
-        n_c = self.real_A.shape[1]
+        n_c = self.original_mri.shape[1]
         # average over channel to get the real and fake image
-        self.real_A_center = self.real_A[:, int(n_c / 2), ...].unsqueeze(1)
-        self.real_B_center = self.real_B[:, int(n_c / 2), ...].unsqueeze(1)
-        self.fake_B_center = self.fake_B[:, int(n_c / 2), ...].unsqueeze(1)
-        self.real_A_avg = torch.mean(self.real_A, dim=1, keepdim=True)
-        self.real_B_avg = torch.mean(self.real_B, dim=1, keepdim=True)
-        self.fake_B_avg = torch.mean(self.fake_B, dim=1, keepdim=True)
-        self.smoothness_fake = torch.sum(torch.abs(self.fake_B[:, :-1, ...] - self.fake_B[:, 1:, ...]),
+        self.real_A_center = self.original_mri[:, int(n_c / 2), ...].unsqueeze(1)
+        self.real_B_center = self.original_us[:, int(n_c / 2), ...].unsqueeze(1)
+        self.fake_B_center = self.mri_inv_original_transf[:, int(n_c / 2), ...].unsqueeze(1)
+        self.real_A_avg = torch.mean(self.original_mri, dim=1, keepdim=True)
+        self.real_B_avg = torch.mean(self.original_us, dim=1, keepdim=True)
+        self.fake_B_avg = torch.mean(self.mri_inv_original_transf, dim=1, keepdim=True)
+        self.smoothness_fake = torch.sum(torch.abs(self.mri_inv_original_transf[:, :-1, ...] - self.mri_inv_original_transf[:, 1:, ...]),
                                          dim=1, keepdim=True)
 
-    def smoothness(self, fake_B):
-        if self.fake_B.shape[1] == 1:
+    def smoothness(self, real_A_inverted):
+        if self.mri_inv_original_transf.shape[1] == 1:
             return 0
-        return self.smoothnessL1(fake_B[:, :-1, ...], fake_B[:, 1:, ...])
+        return self.smoothnessL1(real_A_inverted[:, :-1, ...], real_A_inverted[:, 1:, ...])
 
-    def backward_G(self):
-        """Calculate GAN and L1 loss for the generator"""
-        # First, G(A) should fake the discriminator
-        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
-        pred_fake = self.netD(fake_AB)
-        self.loss_G_GAN = self.criterionGAN(pred_fake, True)
-        # Second, G(A) = B
-        self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
 
-        # Third, Smoothness between channels (slices)
-        self.loss_G_smoothness = self.smoothness(self.fake_B) * self.opt.lambda_smoothness
-        # combine loss and calculate gradients
-        self.loss_G = self.loss_G_GAN + self.loss_G_L1 + self.loss_G_smoothness
-        self.loss_G.backward()
