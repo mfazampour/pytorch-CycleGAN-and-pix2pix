@@ -37,7 +37,9 @@ class Pix2Pix3dModel(BaseModel):
         self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
-        self.visual_names = []  # 'real_A', 'fake_B', 'real_B'] # TODO add visual outputs for visdom
+        self.visual_names = ['real_A_center_sag', 'fake_B_center_sag', 'real_B_center_sag']
+        self.visual_names += ['real_A_center_cor', 'fake_B_center_cor', 'real_B_center_cor']
+        self.visual_names += ['real_A_center_axi', 'fake_B_center_axi', 'real_B_center_axi']
         # specify the models you want to save to the disk. The training/test scripts will call
         # <BaseModel.save_networks> and <BaseModel.load_networks>
         if self.isTrain:
@@ -87,6 +89,7 @@ class Pix2Pix3dModel(BaseModel):
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no_lsgan', type=bool, default=False)
+            parser.add_argument('--visualize_volume', type=bool, default=False)
 
         return parser
 
@@ -146,11 +149,19 @@ class Pix2Pix3dModel(BaseModel):
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
-        n_c = self.real_A.shape[1]
+        n_c = self.real_A.shape[2]
         # average over channel to get the real and fake image
-        self.real_A_center = self.real_A[:, int(n_c / 2), ...].unsqueeze(1)
-        self.real_B_center = self.real_B[:, int(n_c / 2), ...].unsqueeze(1)
-        self.fake_B_center = self.fake_B[:, int(n_c / 2), ...].unsqueeze(1)
-        self.real_A_avg = torch.mean(self.real_A, dim=1, keepdim=True)
-        self.real_B_avg = torch.mean(self.real_B, dim=1, keepdim=True)
-        self.fake_B_avg = torch.mean(self.fake_B, dim=1, keepdim=True)
+        self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
+        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
+        self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[3]
+        self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
+        self.fake_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
+        self.real_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[4]
+        self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
+        self.fake_B_center_axi = self.real_B[..., int(n_c / 2)]
+        self.real_B_center_axi = self.fake_B[..., int(n_c / 2)]
+
