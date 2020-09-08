@@ -15,12 +15,15 @@ from torchio.transforms import (
     Compose,
     OneOf,
     Crop,
-    Resample
+    Resample,
+    Pad
 )
+import napari
 
 
 def load_image_file(path: str) -> np.ndarray:
     img = sitk.ReadImage(path)
+    # TODO normalize between zero and one
     return img
 
 
@@ -32,7 +35,6 @@ class VolumeDataset(BaseDataset):
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
         BaseDataset.__init__(self, opt)
-        self.dir_AB = os.path.join(opt.dataroot, opt.phase)  # get the image directory
         self.opt = opt
         self.root = opt.dataroot
 
@@ -45,28 +47,37 @@ class VolumeDataset(BaseDataset):
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
         self.output_nc = self.opt.input_nc if self.opt.direction == 'BtoA' else self.opt.output_nc
 
+        self.input_size = [128] * 3
+        self.min_size = 64
+
         self.transform = self.create_transforms()
 
     def create_transforms(self):
         # Let's use one preprocessing transform and one augmentation transform
         # This transform will be applied only to scalar images:
-        rescale = RescaleIntensity((0, 1))
-
+        rescale = RescaleIntensity((-1, 1))
+        transforms = [rescale]
         # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
         # Also, there is a 25% chance that none of them will be applied
-        spatial = OneOf(
-            {RandomAffine(): 0.8, RandomElasticDeformation(): 0.2},
-            p=0.75,
-        )
+        if self.opt.is_train:
+            spatial = OneOf(
+                {RandomAffine(): 0.8, RandomElasticDeformation(): 0.2},
+                p=0.75,
+            )
+            transforms += [spatial]
 
-        # Transforms can be composed as in torchvision.transforms
-        transforms = [rescale, spatial]
-        transforms.append(Resample(0.25))
-        crop_size = list(((np.array([85, 66, 79]) * 4 - 256)/2).astype(np.int))
+        self.ratio = self.min_size/np.max(self.input_size)
+        transforms.append(Resample(self.ratio))
+        crop_size = list(((np.array([85, 66, 79]) / self.ratio - self.input_size)/2).astype(np.int))
         transforms.append(Crop(crop_size))
         transform = Compose(transforms)
         return transform
+
+    def reverse_resample(self):
+        transforms = [Resample(1/self.ratio)]
+        pad_size = list(np.ceil((np.array([85, 66, 79]) - np.asarray(self.input_size) * self.ratio) / 2).astype(np.int))
+        return Compose(transforms + [Pad(pad_size)])
 
     def read_list_of_patients(self):
         patients = []
@@ -87,23 +98,32 @@ class VolumeDataset(BaseDataset):
             print(f'loading patient {sample}')
             self.mr[sample] = load_image_file(sample + "/mr.mhd")
             self.trus[sample] = load_image_file(sample + "/trus.mhd")
-        mr = self.mr[sample]
-        trus = self.trus[sample]
+        mr_orig = self.mr[sample]
+        trus_orig = self.trus[sample]
 
-        mr = self.transform(mr)
-        trus = self.transform(trus)
+        mr = self.transform(mr_orig)
+        trus = self.transform(trus_orig)
+
+        mr2 = self.transform(mr_orig)
+
+        if self.opt.visualize_volume:
+            with napari.gui_qt():
+                viewer = napari.view_image(np.stack([sitk.GetArrayFromImage(mr2), sitk.GetArrayFromImage(mr),
+                                                     sitk.GetArrayFromImage(mr) - sitk.GetArrayFromImage(mr2)]))
 
         mr, mr_affine = torchio.utils.sitk_to_nib(mr)
-        mr = torch.tensor(mr)[:, :256, :256, :256]
+        mr = torch.tensor(mr)[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
         trus, trus_affine = torchio.utils.sitk_to_nib(trus)
-        trus = torch.tensor(trus)[:, :256, :256, :256]
+        trus = torch.tensor(trus)[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
+
 
         # # convert to torch tensors with dimension [channel, z, x, y]
         # mr = torch.from_numpy(mr[None, :])
         # trus = torch.from_numpy(trus[None, :])
         return {
             'A': mr,
-            'B': trus
+            'B': trus,
+            'Patient': sample.split('/')[-4]
         }
 
     def __len__(self):
