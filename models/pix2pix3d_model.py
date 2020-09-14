@@ -18,6 +18,31 @@ from . import networks
 
 class Pix2Pix3dModel(BaseModel):
 
+    @staticmethod
+    def modify_commandline_options(parser, is_train=True):
+        """Add new dataset-specific options, and rewrite default values for existing options.
+
+        Parameters:
+            parser          -- original option parser
+            is_train (bool) -- whether training phase or test phase. You can use this flag to add training-specific or test-specific options.
+
+        Returns:
+            the modified parser.
+
+        For pix2pix, we do not use image buffer
+        The training objective is: GAN Loss + lambda_L1 * ||G(A)-B||_1
+        By default, we use vanilla GAN loss, UNet with batchnorm, and aligned datasets.
+        """
+        parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='volume')
+        if is_train:
+            parser.set_defaults(pool_size=0, gan_mode='vanilla')
+            parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
+            parser.add_argument('--no_lsgan', type=bool, default=False)
+            # parser.add_argument('--visualize_volume', type=bool, default=False)
+
+        return parser
+
+
     def __init__(self, opt):
         """Initialize the class.
 
@@ -37,9 +62,10 @@ class Pix2Pix3dModel(BaseModel):
         self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
-        self.visual_names = ['real_A_center_sag', 'fake_B_center_sag', 'real_B_center_sag']
-        self.visual_names += ['real_A_center_cor', 'fake_B_center_cor', 'real_B_center_cor']
-        self.visual_names += ['real_A_center_axi', 'fake_B_center_axi', 'real_B_center_axi']
+        # the empty slice is added since the visualization would be 3 * 4
+        self.visual_names = ['real_A_center_sag', 'fake_B_center_sag', 'real_B_center_sag', 'empty_img_1']
+        self.visual_names += ['real_A_center_cor', 'fake_B_center_cor', 'real_B_center_cor', 'empty_img_2']
+        self.visual_names += ['real_A_center_axi', 'fake_B_center_axi', 'real_B_center_axi', 'empty_img_3']
         # specify the models you want to save to the disk. The training/test scripts will call
         # <BaseModel.save_networks> and <BaseModel.load_networks>
         if self.isTrain:
@@ -68,30 +94,6 @@ class Pix2Pix3dModel(BaseModel):
                                                 lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
-
-    @staticmethod
-    def modify_commandline_options(parser, is_train=True):
-        """Add new dataset-specific options, and rewrite default values for existing options.
-
-        Parameters:
-            parser          -- original option parser
-            is_train (bool) -- whether training phase or test phase. You can use this flag to add training-specific or test-specific options.
-
-        Returns:
-            the modified parser.
-
-        For pix2pix, we do not use image buffer
-        The training objective is: GAN Loss + lambda_L1 * ||G(A)-B||_1
-        By default, we use vanilla GAN loss, UNet with batchnorm, and aligned datasets.
-        """
-        parser.set_defaults(norm='batch', netG='unet_256', dataset_mode='volume')
-        if is_train:
-            parser.set_defaults(pool_size=0, gan_mode='vanilla')
-            parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
-            parser.add_argument('--no_lsgan', type=bool, default=False)
-            parser.add_argument('--visualize_volume', type=bool, default=False)
-
-        return parser
 
     # def name(self):
     #     return 'Pix2Pix3dModel'
@@ -152,16 +154,20 @@ class Pix2Pix3dModel(BaseModel):
         n_c = self.real_A.shape[2]
         # average over channel to get the real and fake image
         self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
-        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
         self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
+        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[3]
         self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
-        self.fake_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
-        self.real_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+        self.fake_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[4]
         self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
-        self.fake_B_center_axi = self.real_B[..., int(n_c / 2)]
-        self.real_B_center_axi = self.fake_B[..., int(n_c / 2)]
+        self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
+        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
+
+        self.empty_img_1 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_2 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_3 = torch.zeros_like(self.real_A_center_axi)
 
