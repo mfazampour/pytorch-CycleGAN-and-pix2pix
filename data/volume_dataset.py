@@ -16,18 +16,36 @@ from torchio.transforms import (
     OneOf,
     Crop,
     Resample,
-    Pad
+    Pad,
+    RandomFlip
 )
 import napari
 
 
 def load_image_file(path: str) -> np.ndarray:
     img = sitk.ReadImage(path)
-    # TODO normalize between zero and one
     return img
 
 
 class VolumeDataset(BaseDataset):
+    """Add flag to visualize the 3D volume
+    """
+    @staticmethod
+    def modify_commandline_options(parser, is_train):
+        """Add new dataset-specific options, and rewrite default values for existing options.
+
+        Parameters:
+            parser          -- original option parser
+            is_train (bool) -- whether training phase or test phase. You can use this flag to add training-specific or test-specific options.
+
+        Returns:
+            the modified parser.
+
+        Set visualize to False. it's only used for debugging.
+        """
+        parser.set_defaults(visualize_volume=False)
+        return parser
+
     def __init__(self, opt):
         """Initialize this dataset class.
 
@@ -40,8 +58,9 @@ class VolumeDataset(BaseDataset):
 
         self.patients = self.read_list_of_patients()
         random.shuffle(self.patients)
-        self.mr = {}
-        self.trus = {}
+        self.subjects = {}
+        # self.mr = {}
+        # self.trus = {}
 
         assert(self.opt.load_size >= self.opt.crop_size)   # crop_size should be smaller than the size of loaded image
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
@@ -60,12 +79,12 @@ class VolumeDataset(BaseDataset):
         # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
         # Also, there is a 25% chance that none of them will be applied
-        if self.opt.is_train:
+        if self.opt.isTrain:
             spatial = OneOf(
-                {RandomAffine(): 0.8, RandomElasticDeformation(): 0.2},
+                {RandomAffine(translation=5): 0.8, RandomElasticDeformation(): 0.2},
                 p=0.75,
             )
-            transforms += [spatial]
+            transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
 
         self.ratio = self.min_size/np.max(self.input_size)
         transforms.append(Resample(self.ratio))
@@ -90,44 +109,39 @@ class VolumeDataset(BaseDataset):
     def __getitem__(self, index):
         # returns samples of dimension [channels, z, x, y]
 
-        sample = self.patients[index]
+        sample = self.patients[index % len(self.patients)]
 
         # data_folder = '/preprocessed/cropped/'
         # load mr and turs file if it hasn't already been loaded
-        if sample not in self.mr:
+        if sample not in self.subjects:
             print(f'loading patient {sample}')
-            self.mr[sample] = load_image_file(sample + "/mr.mhd")
-            self.trus[sample] = load_image_file(sample + "/trus.mhd")
-        mr_orig = self.mr[sample]
-        trus_orig = self.trus[sample]
+            subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                      trus=torchio.Image(sample + "/trus.mhd"))
+            self.subjects[sample] = subject
+        subject = self.subjects[sample]
 
-        mr = self.transform(mr_orig)
-        trus = self.transform(trus_orig)
-
-        mr2 = self.transform(mr_orig)
+        transformed_ = self.transform(subject)
 
         if self.opt.visualize_volume:
             with napari.gui_qt():
-                viewer = napari.view_image(np.stack([sitk.GetArrayFromImage(mr2), sitk.GetArrayFromImage(mr),
-                                                     sitk.GetArrayFromImage(mr) - sitk.GetArrayFromImage(mr2)]))
+                napari.view_image(np.stack([transformed_['mr'].data.squeeze().numpy(),
+                                                     transformed_['trus'].data.squeeze().numpy()]))
 
-        mr, mr_affine = torchio.utils.sitk_to_nib(mr)
-        mr = torch.tensor(mr)[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
-        trus, trus_affine = torchio.utils.sitk_to_nib(trus)
-        trus = torch.tensor(trus)[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
-
-
-        # # convert to torch tensors with dimension [channel, z, x, y]
-        # mr = torch.from_numpy(mr[None, :])
-        # trus = torch.from_numpy(trus[None, :])
         return {
-            'A': mr,
-            'B': trus,
-            'Patient': sample.split('/')[-4]
+            'A': transformed_['mr'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
+            'B': transformed_['trus'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
+            'Patient': sample.split('/')[-4],
+            'A_paths': sample + "/mr.mhd",
+            'B_paths': sample + "/trus.mhd"
         }
 
     def __len__(self):
-        return len(self.patients)
+        return 5 * len(self.patients)
 
     def name(self):
         return 'VolumeDataset'
+
+
+class UnalignedVolumeDataset(VolumeDataset):
+    # TODO: check if actually it makes sense to define this unaligned class
+    pass
