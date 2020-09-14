@@ -8,9 +8,10 @@ from PIL import Image
 from options.base_options import BaseOptions
 from data import create_dataset
 from models import create_model
-from models.pix2pix_model import Pix2PixModel
+from models.pix2pix3d_model import Pix2Pix3dModel
 from util.visualizer import save_images
 from util import html
+from data.volume_dataset import VolumeDataset
 
 
 class VolumeTestOptions(BaseOptions):
@@ -78,45 +79,10 @@ def save_network_output(fake_volume, opt, idx, patient_name):
     compound_volume(fake_volume, opt, f'{patient_name}/chunk_{idx}')
 
 
-def patient_fake_compound(dataset, patient_name: str):
-    fake_slices = []
-    for i, data in enumerate(dataset):
-        if i >= opt.num_test:  # only apply our model to opt.num_test images.
-            break
-        model.set_input(data)  # unpack data from data loader
-        model.test()  # run inference
-        visuals = model.get_current_visuals()  # get image results
-        try:
-            fake = visuals['fake_B'].cpu().squeeze().numpy()
-            fake_volume = fake
-        except KeyError:
-            fake = visuals['fake_B_center'].cpu().squeeze(dim=0).numpy()
-            if isinstance(model, Pix2PixModel):
-                fake_volume = model.fake_B.cpu().squeeze(dim=0).numpy()
-                fake_volume = np.transpose(fake_volume, axes=(1, 2, 0))
-        fake = np.transpose(fake, axes=[1, 2, 0])
-        if opt.num_of_channels == 1:
-            if opt.plot_result:
-                plt.imshow(fake, cmap='gray')
-                plt.title(f'show image at index {i}')
-                plt.show()
-            fake = cv2.cvtColor(fake, cv2.COLOR_RGB2GRAY)
-            fake_slices.append(fake)
-        else:
-            save_network_output(fake_volume, opt, patient_name=patient_name, idx=i)
-            fake_slices.append(fake_volume)
-        img_path = model.get_image_paths()  # get image paths
-        if i % 5 == 0:  # save images to an HTML file
-            print('processing (%04d)-th image... %s' % (i, img_path))
-        save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
-    if opt.num_of_channels:
-        fake_slices = slices_from_multichannel(fake_slices, opt)
-    compound_volume(fake_slices, opt, patient_name)
-    webpage.save()  # save the HTML
-
-
 if __name__ == '__main__':
     opt = VolumeTestOptions().parse()  # get test options
+    opt.isTrain = False
+    opt.visualize_volume = False
     # hard-code some parameters for test
     opt.num_threads = 0  # test code only supports num_threads = 1
     opt.batch_size = 1  # test code only supports batch_size = 1
@@ -125,13 +91,7 @@ if __name__ == '__main__':
     opt.display_id = -1  # no visdom display; the test code saves the results to a HTML file.
     model = create_model(opt)  # create a model given opt.model and other options
     model.setup(opt)  # regular setup: load and print networks; create schedulers
-    # create a website
-    web_dir = os.path.join(opt.results_dir, opt.name,
-                           '{}_{}'.format(opt.phase, opt.epoch))  # define the website directory
-    if opt.load_iter > 0:  # load_iter is 0 by default
-        web_dir = '{:s}_iter{:d}'.format(web_dir, opt.load_iter)
-    print('creating web directory', web_dir)
-    webpage = html.HTML(web_dir, 'Experiment = %s, Phase = %s, Epoch = %s' % (opt.name, opt.phase, opt.epoch))
+
     # test with eval mode. This only affects layers like batchnorm and dropout.
     # For [pix2pix]: we use batchnorm and dropout in the original pix2pix. You can experiment it with and without eval() mode.
     # For [CycleGAN]: It should not affect CycleGAN as CycleGAN uses instancenorm without dropout.
@@ -140,9 +100,28 @@ if __name__ == '__main__':
 
     assert np.mod(opt.num_of_channels, 2) == 1, "num of channels should be an odd number, (for simplicity)"
 
-    for root, dirs, files in os.walk(opt.patients_dir):
-        if 'test' in dirs:
-            patient_name = root.split('/')[-1]
-            opt.dataroot = root
-            dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
-            patient_fake_compound(dataset, patient_name)
+    dataset = create_dataset(opt)
+
+    print(len(dataset))
+    transform = VolumeDataset(opt).reverse_resample()
+    assert isinstance(model, Pix2Pix3dModel), 'not the right type of model'
+    for i, data in enumerate(dataset):
+        if i >= opt.num_test:  # only apply our model to opt.num_test images.
+            break
+        model.set_input(data)  # unpack data from data loader
+        model.test()           # run inference
+        visuals = model.get_current_visuals()  # get image results
+        img_path = model.get_image_paths()     # get image paths
+        patient_name = data['Patient'][0]
+        vol = model.fake_B.cpu().squeeze(dim=0).numpy()
+        vol = transform(vol)
+        vol = np.squeeze(vol)
+        vol = np.transpose(vol, axes=[2, 1, 0])
+        vol = sitk.GetImageFromArray(vol)
+        vol.SetSpacing(opt.res)
+        path = opt.results_dir + f'volumes/fake_{patient_name}.mhd'
+        dir_ = os.path.dirname(path)
+        if not os.path.isdir(dir_):
+            os.makedirs(dir_)
+        sitk.WriteImage(vol, opt.results_dir + f'volumes/fake_{patient_name}.mhd')
+
