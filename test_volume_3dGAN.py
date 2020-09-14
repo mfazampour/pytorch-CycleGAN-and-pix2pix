@@ -81,7 +81,7 @@ def save_network_output(fake_volume, opt, idx, patient_name):
 
 if __name__ == '__main__':
     opt = VolumeTestOptions().parse()  # get test options
-    opt.is_train = False
+    opt.isTrain = False
     opt.visualize_volume = False
     # hard-code some parameters for test
     opt.num_threads = 0  # test code only supports num_threads = 1
