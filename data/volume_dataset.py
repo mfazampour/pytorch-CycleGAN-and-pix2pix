@@ -41,9 +41,10 @@ class VolumeDataset(BaseDataset):
         Returns:
             the modified parser.
 
-        Set visualize to False. it's only used for debugging.
         """
-        parser.set_defaults(visualize_volume=False)
+        parser.add_argument('--visualize_volume', type=bool, default=False, help='Set visualize to False. it\'s only '
+                                                                                 'used for debugging.')
+        parser.add_argument('--load_mask', type=bool, default=False, help='load prostate mask for seg. loss')
         return parser
 
     def __init__(self, opt):
@@ -55,6 +56,7 @@ class VolumeDataset(BaseDataset):
         BaseDataset.__init__(self, opt)
         self.opt = opt
         self.root = opt.dataroot
+        self.load_mask = opt.load_mask
 
         self.patients = self.read_list_of_patients()
         random.shuffle(self.patients)
@@ -107,18 +109,7 @@ class VolumeDataset(BaseDataset):
         return patients
 
     def __getitem__(self, index):
-        # returns samples of dimension [channels, z, x, y]
-
-        sample = self.patients[index % len(self.patients)]
-
-        # data_folder = '/preprocessed/cropped/'
-        # load mr and turs file if it hasn't already been loaded
-        if sample not in self.subjects:
-            print(f'loading patient {sample}')
-            subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                      trus=torchio.Image(sample + "/trus.mhd"))
-            self.subjects[sample] = subject
-        subject = self.subjects[sample]
+        sample, subject = self.load_subject_(index)
 
         transformed_ = self.transform(subject)
 
@@ -127,13 +118,35 @@ class VolumeDataset(BaseDataset):
                 napari.view_image(np.stack([transformed_['mr'].data.squeeze().numpy(),
                                                      transformed_['trus'].data.squeeze().numpy()]))
 
-        return {
+        dict_ = {
             'A': transformed_['mr'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
             'B': transformed_['trus'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
             'Patient': sample.split('/')[-4],
             'A_paths': sample + "/mr.mhd",
             'B_paths': sample + "/trus.mhd"
         }
+        if self.load_mask:
+            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
+
+        return dict_
+
+    def load_subject_(self, index):
+        # returns samples of dimension [channels, z, x, y]
+        sample = self.patients[index % len(self.patients)]
+        # data_folder = '/preprocessed/cropped/'
+        # load mr and turs file if it hasn't already been loaded
+        if sample not in self.subjects:
+            print(f'loading patient {sample}')
+            if self.load_mask:
+                subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                          trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                          mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
+            else:
+                subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                          trus=torchio.Image(sample + "/trus.mhd"))
+            self.subjects[sample] = subject
+        subject = self.subjects[sample]
+        return sample, subject
 
     def __len__(self):
         return 5 * len(self.patients)
