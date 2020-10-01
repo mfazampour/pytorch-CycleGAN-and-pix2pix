@@ -4,11 +4,13 @@ import cv2
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 from PIL import Image
+import torch.nn.functional as F
 
 from options.base_options import BaseOptions
 from data import create_dataset
 from models import create_model
 from models.pix2pix3d_model import Pix2Pix3dModel
+from models.pix2pix3d_seg_model import Pix2Pix3dSegModel
 from util.visualizer import save_images
 from util import html
 from data.volume_dataset import VolumeDataset
@@ -79,6 +81,19 @@ def save_network_output(fake_volume, opt, idx, patient_name):
     compound_volume(fake_volume, opt, f'{patient_name}/chunk_{idx}')
 
 
+def save_image(vol, file_name, transform):
+    vol = transform(vol)
+    vol = np.squeeze(vol)
+    vol = np.transpose(vol, axes=[2, 1, 0])
+    vol = sitk.GetImageFromArray(vol)
+    vol.SetSpacing(opt.res)
+    path = opt.results_dir + file_name
+    dir_ = os.path.dirname(path)
+    if not os.path.isdir(dir_):
+        os.makedirs(dir_)
+    sitk.WriteImage(vol, path)
+
+
 if __name__ == '__main__':
     opt = VolumeTestOptions().parse()  # get test options
     opt.isTrain = False
@@ -103,25 +118,23 @@ if __name__ == '__main__':
     dataset = create_dataset(opt)
 
     print(len(dataset))
-    transform = VolumeDataset(opt).reverse_resample()
+    transform_img = VolumeDataset(opt).reverse_resample(min_value=-1)
+    transform_label = VolumeDataset(opt).reverse_resample(min_value=0)
     assert isinstance(model, Pix2Pix3dModel), 'not the right type of model'
     for i, data in enumerate(dataset):
         if i >= opt.num_test:  # only apply our model to opt.num_test images.
             break
         model.set_input(data)  # unpack data from data loader
-        model.test()           # run inference
+        model.test()  # run inference
         visuals = model.get_current_visuals()  # get image results
-        img_path = model.get_image_paths()     # get image paths
+        img_path = model.get_image_paths()  # get image paths
         patient_name = data['Patient'][0]
+        file_name = f'volumes/fake_{patient_name}.mhd'
         vol = model.fake_B.cpu().squeeze(dim=0).numpy()
-        vol = transform(vol)
-        vol = np.squeeze(vol)
-        vol = np.transpose(vol, axes=[2, 1, 0])
-        vol = sitk.GetImageFromArray(vol)
-        vol.SetSpacing(opt.res)
-        path = opt.results_dir + f'volumes/fake_{patient_name}.mhd'
-        dir_ = os.path.dirname(path)
-        if not os.path.isdir(dir_):
-            os.makedirs(dir_)
-        sitk.WriteImage(vol, opt.results_dir + f'volumes/fake_{patient_name}.mhd')
-
+        save_image(vol, file_name, transform_img)
+        if isinstance(model, Pix2Pix3dSegModel):
+            # store the segmentations too
+            vol = F.softmax(model.seg_B, dim=1)[:, 1, ...].cpu().numpy()
+            vol = vol >= 0.5
+            file_name = f'volumes/fake_{patient_name}_seg.mhd'
+            save_image(vol, file_name, transform_label)

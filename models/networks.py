@@ -770,7 +770,7 @@ class BinaryDiceLoss(nn.Module):
         predict = predict.contiguous().view(predict.shape[0], -1)
         target = target.contiguous().view(target.shape[0], -1)
 
-        num = torch.sum(torch.mul(predict, target), dim=1) + self.smooth
+        num = 2 * torch.sum(torch.mul(predict, target), dim=1) + self.smooth
         den = torch.sum(predict.pow(self.p) + target.pow(self.p), dim=1) + self.smooth
 
         loss = 1 - num / den
@@ -808,7 +808,7 @@ class DiceLoss(nn.Module):
             target_ = target.view(target.shape[0], target.shape[1], -1)
             target_ = F.one_hot(target_.to(torch.int64))
             target_ = target_.view((*target.shape, predict.shape[1]))
-            target = target_.squeeze().permute(0, -1, 1, 2, 3)
+            target = target_.squeeze(dim=1).permute(0, -1, 1, 2, 3)
 
         assert predict.shape == target.shape, 'predict & target shape do not match'
         dice = BinaryDiceLoss(**self.kwargs)
@@ -817,7 +817,7 @@ class DiceLoss(nn.Module):
 
         for i in range(target.shape[1]):
             if i != self.ignore_index:
-                dice_loss = dice(predict[:, i], target[:, i])
+                dice_loss = dice(predict[:, i, ...], target[:, i, ...])
                 if self.weight is not None:
                     assert self.weight.shape[0] == target.shape[1], \
                         'Expect weight shape [{}], get[{}]'.format(target.shape[1], self.weight.shape[0])

@@ -95,10 +95,10 @@ class VolumeDataset(BaseDataset):
         transform = Compose(transforms)
         return transform
 
-    def reverse_resample(self):
+    def reverse_resample(self, min_value=-1):
         transforms = [Resample(1/self.ratio)]
         pad_size = list(np.ceil((np.array([85, 66, 79]) - np.asarray(self.input_size) * self.ratio) / 2).astype(np.int))
-        return Compose(transforms + [Pad(pad_size)])
+        return Compose(transforms + [Pad(pad_size, padding_mode=min_value)])
 
     def read_list_of_patients(self):
         patients = []
