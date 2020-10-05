@@ -13,3 +13,4 @@ scipy
 requests
 opencv-python
 matplotlib
+geomstats

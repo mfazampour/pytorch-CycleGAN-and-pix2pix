@@ -851,7 +851,6 @@ class SE3LossFunction(torch.autograd.Function):
         # ignored, the return statement is simple even when the function has
         # optional inputs.
         y_pred, y_target = ctx.saved_tensors
-        print(f'------------ {grad_output.shape}')
         grad = se3.grad(y_pred.detach().cpu(), y_target.cpu())
         return torch.tensor(grad, dtype=y_pred.dtype, device=y_pred.device) * grad_output.unsqueeze(1), None
 

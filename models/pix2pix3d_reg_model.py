@@ -8,6 +8,7 @@ import torch
 import os
 import argparse
 from collections import OrderedDict
+import GPUtil
 
 import util.util as util
 from util.image_pool import ImagePool
@@ -71,7 +72,7 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         # the empty slice is added since the visualization would be 3 * 4
         self.visual_names += ['reg_A_center_sag', 'diff_A_center_sag', 'reg_B_center_sag', 'diff_B_center_sag']
         self.visual_names += ['reg_A_center_cor', 'diff_A_center_cor', 'reg_B_center_cor', 'diff_B_center_cor']
-        self.visual_names += ['reg_A_center_axi', 'diff_A_center_axi', 'seg_B_center_axi', 'diff_B_center_axi']
+        self.visual_names += ['reg_A_center_axi', 'diff_A_center_axi', 'reg_B_center_axi', 'diff_B_center_axi']
         # specify the models you want to save to the disk. The training/test scripts will call
         # <BaseModel.save_networks> and <BaseModel.load_networks>
         if self.isTrain:
@@ -80,7 +81,8 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
             self.model_names = ['G', 'Reg']
 
         # We are using DenseNet for rigid registration
-        self.netReg = networks3d.define_reg_model(n_input_channels=2, num_classes=6, gpu_ids=self.gpu_ids)
+        # self.netReg = networks3d.define_reg_model(n_input_channels=2, num_classes=6, gpu_ids=self.gpu_ids)
+        self.netReg = networks3d.define_reg_model(model_type='NormalNet', num_classes=6, gpu_ids=self.gpu_ids)
 
         if self.isTrain:
             # define loss functions
@@ -91,7 +93,18 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
     # def name(self):
     #     return 'Pix2Pix3dModel'
 
+    def clean_tensors(self):
+        all_members = self.__dict__.keys()
+        print(f'{all_members}')
+        GPUtil.showUtilization()
+        for item in all_members:
+            if isinstance(self.__dict__[item], torch.Tensor):
+                self.__dict__[item] = None
+        torch.cuda.empty_cache()
+        GPUtil.showUtilization()
+
     def set_input(self, input):
+        self.clean_tensors()
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
@@ -153,7 +166,8 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         self.optimizer_G.zero_grad()  # set G's gradients to zero
         self.backward_G()  # calculate graidents for G
         self.optimizer_G.step()  # udpate G's weights
-        # update segmentation networks
+
+        # update registration networks
         self.set_requires_grad(self.netReg, True)
         self.optimizer_Reg.zero_grad()
         self.backward_Reg()
@@ -163,30 +177,33 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         """Calculate additional output images for visdom and HTML visualization"""
         super(Pix2Pix3dRegModel, self).compute_visuals()
 
-        self.reg_A = affine_transform.transform_image(self.fake_B,
+        reg_A = affine_transform.transform_image(self.fake_B,
                                                       affine_transform.tensor_vector_to_matrix(self.reg_A_params),
                                                       device=self.real_B.device)
 
-        self.reg_B = affine_transform.transform_image(self.real_B,
+        reg_B = affine_transform.transform_image(self.real_B,
                                                       affine_transform.tensor_vector_to_matrix(self.reg_B_params),
                                                       device=self.real_B.device)
 
         n_c = self.real_A.shape[2]
         # average over channel to get the real and fake image
-        self.mask_A_center_sag = self.mask_A[:, :, int(n_c / 2), ...]
-        self.seg_A_center_sag = self.seg_A[:, :, int(n_c / 2), ...]
-        self.seg_B_center_sag = self.seg_B[:, :, int(n_c / 2), ...]
+
+        diff_A = reg_A - self.transformed_B
+        diff_B = reg_B - self.transformed_B
+
+        self.reg_A_center_sag = reg_A[:, :, int(n_c / 2), ...]
+        self.diff_A_center_sag = diff_A[:, :, int(n_c / 2), ...]
+        self.reg_B_center_sag = reg_B[:, :, int(n_c / 2), ...]
+        self.diff_B_center_sag = diff_B[:, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[3]
-        self.mask_A_center_cor = self.mask_A[:, :, :, int(n_c / 2), ...]
-        self.seg_A_center_cor = self.seg_A[:, :, :, int(n_c / 2), ...]
-        self.seg_B_center_cor = self.seg_B[:, :, :, int(n_c / 2), ...]
+        self.reg_A_center_cor = reg_A[:, :, :, int(n_c / 2), ...]
+        self.diff_A_center_cor = diff_A[:, :, :, int(n_c / 2), ...]
+        self.reg_B_center_cor = reg_B[:, :, :, int(n_c / 2), ...]
+        self.diff_B_center_cor = diff_B[:, :, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[4]
-        self.mask_A_center_axi = self.mask_A[..., int(n_c / 2)]
-        self.seg_A_center_axi = self.seg_A[..., int(n_c / 2)]
-        self.seg_B_center_axi = self.seg_B[..., int(n_c / 2)]
-
-        self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
+        self.reg_A_center_axi = reg_A[..., int(n_c / 2)]
+        self.diff_A_center_axi = diff_A[..., int(n_c / 2)]
+        self.reg_B_center_axi = reg_B[..., int(n_c / 2)]
+        self.diff_B_center_axi = diff_B[..., int(n_c / 2)]

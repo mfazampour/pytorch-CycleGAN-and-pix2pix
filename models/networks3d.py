@@ -634,31 +634,83 @@ class DenseNet(nn.Module):
         return out
 
 
-def define_reg_model(model_type=121, init_type='normal', init_gain=0.02,
+class NormalNet(nn.Module):
+    def __init__(self, input_nc=2, ndf=64, n_layers=5, norm_layer=nn.BatchNorm3d,
+                 num_classes=6, img_shape=None):
+        super(NormalNet, self).__init__()
+        if img_shape is None:
+            img_shape = [128, 128, 128]
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm3d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm3d
+
+        kw = 4
+        padw = int(np.ceil((kw - 1) / 2))
+        sequence = [
+            nn.Conv3d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw),
+            nn.LeakyReLU(0.2, True)
+        ]
+
+        nf_mult = 1
+        nf_mult_prev = 1
+        for n in range(1, n_layers):
+            nf_mult_prev = nf_mult
+            nf_mult = min(2 ** n, 8)
+            sequence += [
+                nn.Conv3d(ndf * nf_mult_prev, ndf * nf_mult,
+                          kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True)
+            ]
+
+        nf_mult_prev = nf_mult
+        nf_mult = min(2 ** n_layers, 8)
+        sequence += [
+            nn.Conv3d(ndf * nf_mult_prev, ndf * nf_mult,
+                      kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+            norm_layer(ndf * nf_mult),
+            nn.LeakyReLU(0.2, True)
+        ]
+
+        sequence += [nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]
+
+        sequence += [nn.Flatten(),
+                     nn.Linear(343, num_classes)]
+
+        self.model = nn.Sequential(*sequence)
+
+    def forward(self, input_):
+        return self.model(input_)
+
+
+def define_reg_model(model_type='121', init_type='normal', init_gain=0.02,
                      gpu_ids=None, **kwargs):
     if gpu_ids is None:
         gpu_ids = []
-    model_types = [121, 169, 201, 264]
-    if model_type == 121:
+    model_types = ['121', '169', '201', '264', 'NormalNet']
+    if model_type == '121':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
                          block_config=(6, 12, 24, 16),
                          **kwargs)
-    elif model_type == 169:
+    elif model_type == '169':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
                          block_config=(6, 12, 32, 32),
                          **kwargs)
-    elif model_type == 201:
+    elif model_type == '201':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
                          block_config=(6, 12, 48, 32),
                          **kwargs)
-    elif model_type == 264:
+    elif model_type == '264':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
                          block_config=(6, 12, 64, 48),
                          **kwargs)
+    elif model_type == 'NormalNet':
+        model = NormalNet(**kwargs)
     else:
         raise NotImplementedError(f'model_type can be among {model_types}')
 
