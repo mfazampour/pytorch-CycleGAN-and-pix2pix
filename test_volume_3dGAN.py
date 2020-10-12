@@ -11,9 +11,11 @@ from data import create_dataset
 from models import create_model
 from models.pix2pix3d_model import Pix2Pix3dModel
 from models.pix2pix3d_seg_model import Pix2Pix3dSegModel
+from models.pix2pix3d_reg_model import Pix2Pix3dRegModel
 from util.visualizer import save_images
 from util import html
 from data.volume_dataset import VolumeDataset
+from util.se3 import loss
 
 
 class VolumeTestOptions(BaseOptions):
@@ -129,7 +131,7 @@ if __name__ == '__main__':
         visuals = model.get_current_visuals()  # get image results
         img_path = model.get_image_paths()  # get image paths
         patient_name = data['Patient'][0]
-        file_name = f'volumes/fake_{patient_name}.mhd'
+        file_name = f'volumes/{patient_name}_fake_US.mhd'
         vol = model.fake_B.cpu().squeeze(dim=0).numpy()
         save_image(vol, file_name, transform_img)
         if isinstance(model, Pix2Pix3dSegModel):
@@ -138,3 +140,15 @@ if __name__ == '__main__':
             vol = vol >= 0.5
             file_name = f'volumes/fake_{patient_name}_seg.mhd'
             save_image(vol, file_name, transform_label)
+
+        if isinstance(model, Pix2Pix3dRegModel):
+            # check the values for registration parameters
+            gt_vector = model.gt_vector.cpu()
+            est_vector = model.reg_B_params.detach().cpu()
+            loss_ = loss(est_vector, gt_vector)
+            print(f'for patient {patient_name} registration loss is {loss_}')
+            reg_A, reg_B = model.get_transformed_images()
+            file_name = f'volumes/{patient_name}_original_registered.mhd'
+            save_image(reg_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
+            file_name = f'volumes/{patient_name}_transformed.mhd'
+            save_image(model.transformed_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
