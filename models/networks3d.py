@@ -13,7 +13,7 @@ from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
 import torch.nn.functional as F
-
+import torch.utils.checkpoint as cp
 
 ###############################################################################
 # Functions
@@ -480,11 +480,20 @@ class NLayerDiscriminator3d(nn.Module):
 ############################################################
 ## DenseNet 3D
 ## taken from: https://github.com/kenshohara/3D-ResNets-PyTorch/
+## merged with efficient Densenet from: https://github.com/gpleiss/efficient_densenet_pytorch/
 ############################################################
 
-class _DenseLayer(nn.Sequential):
+def _bn_function_factory(norm, relu, conv):
+    def bn_function(*inputs):
+        concated_features = torch.cat(inputs, 1)
+        bottleneck_output = conv(relu(norm(concated_features)))
+        return bottleneck_output
 
-    def __init__(self, num_input_features, growth_rate, bn_size, drop_rate):
+    return bn_function
+
+class _DenseLayer(nn.Module):
+
+    def __init__(self, num_input_features, growth_rate, bn_size, drop_rate, efficient=False):
         super().__init__()
         self.add_module('norm1', nn.BatchNorm3d(num_input_features))
         self.add_module('relu1', nn.ReLU(inplace=True))
@@ -506,25 +515,38 @@ class _DenseLayer(nn.Sequential):
                       padding=1,
                       bias=False))
         self.drop_rate = drop_rate
+        self.efficient = efficient
 
-    def forward(self, x):
-        new_features = super().forward(x)
+    def forward(self, *prev_features):
+        bn_function = _bn_function_factory(self.norm1, self.relu1, self.conv1)
+        if self.efficient:
+            bottleneck_output = cp.checkpoint(bn_function, *prev_features)
+        else:
+            bottleneck_output = bn_function(*prev_features)
+        new_features = self.conv2(self.relu2(self.norm2(bottleneck_output)))
         if self.drop_rate > 0:
             new_features = F.dropout(new_features,
                                      p=self.drop_rate,
                                      training=self.training)
-        return torch.cat([x, new_features], 1)
+        return new_features
 
 
-class _DenseBlock(nn.Sequential):
+class _DenseBlock(nn.Module):
 
     def __init__(self, num_layers, num_input_features, bn_size, growth_rate,
-                 drop_rate):
+                 drop_rate, efficient=False):
         super().__init__()
         for i in range(num_layers):
             layer = _DenseLayer(num_input_features + i * growth_rate,
-                                growth_rate, bn_size, drop_rate)
+                                growth_rate, bn_size, drop_rate, efficient=efficient)
             self.add_module('denselayer{}'.format(i + 1), layer)
+
+    def forward(self, init_features):
+        features = [init_features]
+        for name, layer in self.named_children():
+            new_features = layer(*features)
+            features.append(new_features)
+        return torch.cat(features, 1)
 
 
 class _Transition(nn.Sequential):
@@ -557,15 +579,17 @@ class DenseNet(nn.Module):
 
     def __init__(self,
                  n_input_channels=3,
-                 conv1_t_size=7,
-                 conv1_t_stride=1,
+                 conv1_size=5,
+                 conv1_stride=2,
                  no_max_pool=False,
                  growth_rate=32,
                  block_config=(6, 12, 24, 16),
                  num_init_features=64,
                  bn_size=4,
                  drop_rate=0,
-                 num_classes=1000):
+                 num_classes=1000,
+                 compression=0.5,
+                 efficient=False):
 
         super().__init__()
 
@@ -573,9 +597,9 @@ class DenseNet(nn.Module):
         self.features = [('conv1',
                           nn.Conv3d(n_input_channels,
                                     num_init_features,
-                                    kernel_size=(conv1_t_size, 7, 7),
-                                    stride=(conv1_t_stride, 2, 2),
-                                    padding=(conv1_t_size // 2, 3, 3),
+                                    kernel_size=conv1_size,
+                                    stride=conv1_stride,
+                                    padding=conv1_size // 2,
                                     bias=False)),
                          ('norm1', nn.BatchNorm3d(num_init_features)),
                          ('relu1', nn.ReLU(inplace=True))]
@@ -591,24 +615,19 @@ class DenseNet(nn.Module):
                                 num_input_features=num_features,
                                 bn_size=bn_size,
                                 growth_rate=growth_rate,
-                                drop_rate=drop_rate)
+                                drop_rate=drop_rate,
+                                efficient=efficient
+                                )
             self.features.add_module('denseblock{}'.format(i + 1), block)
             num_features = num_features + num_layers * growth_rate
             if i != len(block_config) - 1:
                 trans = _Transition(num_input_features=num_features,
-                                    num_output_features=num_features // 2)
+                                    num_output_features=int(num_features * compression))
                 self.features.add_module('transition{}'.format(i + 1), trans)
-                num_features = num_features // 2
+                num_features = int(num_features * compression)
 
         # Final batch norm
-        self.features.add_module('norm5', nn.BatchNorm3d(num_features))
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv3d):
-                m.weight = nn.init.kaiming_normal(m.weight, mode='fan_out')
-            elif isinstance(m, nn.BatchNorm3d) or isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+        self.features.add_module('norm_final', nn.BatchNorm3d(num_features))
 
         # Linear layer
         self.classifier = nn.Linear(num_features, num_classes)
@@ -623,20 +642,22 @@ class DenseNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm3d) or isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
     def forward(self, x):
         features = self.features(x)
         out = F.relu(features, inplace=True)
-        out = F.adaptive_avg_pool3d(out,
-                                    output_size=(1, 1,
-                                                 1)).view(features.size(0), -1)
+        out = F.adaptive_avg_pool3d(out, output_size=(1, 1, 1))
+        out = torch.flatten(out, 1)
         out = self.classifier(out)
         return out
 
 
 class NormalNet(nn.Module):
     def __init__(self, input_nc=2, ndf=64, n_layers=5, norm_layer=nn.BatchNorm3d,
-                 num_classes=6, img_shape=None):
+                 num_classes=6, img_shape=None, **kwargs):
         super(NormalNet, self).__init__()
         if img_shape is None:
             img_shape = [128, 128, 128]
@@ -685,28 +706,32 @@ class NormalNet(nn.Module):
 
 
 def define_reg_model(model_type='121', init_type='normal', init_gain=0.02,
-                     gpu_ids=None, **kwargs):
+                     gpu_ids=None, efficient=True, **kwargs):
     if gpu_ids is None:
         gpu_ids = []
     model_types = ['121', '169', '201', '264', 'NormalNet']
     if model_type == '121':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
+                         efficient=efficient,
                          block_config=(6, 12, 24, 16),
                          **kwargs)
     elif model_type == '169':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
+                         efficient=efficient,
                          block_config=(6, 12, 32, 32),
                          **kwargs)
     elif model_type == '201':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
+                         efficient=efficient,
                          block_config=(6, 12, 48, 32),
                          **kwargs)
     elif model_type == '264':
         model = DenseNet(num_init_features=64,
                          growth_rate=32,
+                         efficient=efficient,
                          block_config=(6, 12, 64, 48),
                          **kwargs)
     elif model_type == 'NormalNet':

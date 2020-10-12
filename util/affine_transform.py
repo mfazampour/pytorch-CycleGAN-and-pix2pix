@@ -54,8 +54,8 @@ def create_random_affine(n, img_shape=torch.tensor([128.0, 128.0, 128.0]), dtype
     affine
     vector
     """
-    rotation = torch.rand((n, 3), dtype=dtype) * 0.4
-    translation = torch.rand((n, 3), dtype=dtype) * 0.2
+    rotation = (2 * torch.rand((n, 3), dtype=dtype) - 1) * 0.4
+    translation = (2 * torch.rand((n, 3), dtype=dtype) - 1) * 0.2
     vector = torch.cat((rotation, translation), dim=1)
     affines = torch.zeros((n, 4, 4), dtype=dtype)
     for i in range(n):

@@ -33,10 +33,12 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         parser
         """
         parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='volume')
-        parser.add_argument('--netSeg', type=str, default='unet_128', help='Type of network used for segmentation')
+        parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
         parser.add_argument('--num_classes', type=int, default=2, help='num of classes for segmentation')
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
+        parser.add_argument('--L1_epochs', type=int, default=15,
+                            help='number of epochs to train the network with the L1 loss before reg loss is used')
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
@@ -81,14 +83,16 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
             self.model_names = ['G', 'Reg']
 
         # We are using DenseNet for rigid registration
-        # self.netReg = networks3d.define_reg_model(n_input_channels=2, num_classes=6, gpu_ids=self.gpu_ids)
-        self.netReg = networks3d.define_reg_model(model_type='NormalNet', num_classes=6, gpu_ids=self.gpu_ids)
+        self.netReg = networks3d.define_reg_model(model_type=self.opt.netReg, n_input_channels=2,
+                                                  num_classes=6, gpu_ids=self.gpu_ids)
 
         if self.isTrain:
             # define loss functions
             self.criterionReg = networks.RegistrationLoss()
             self.optimizer_Reg = torch.optim.Adam(self.netReg.parameters(), lr=opt.lr_Reg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Reg)
+
+        self.first_phase_coeff = 1
 
     # def name(self):
     #     return 'Pix2Pix3dModel'
@@ -131,11 +135,13 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         # Second, G(A) = B
         self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
 
-        # Third, Seg(G(A)) =
-        # self.loss_G_Reg = self.criterionReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
+        # Third, registration =
+        loss_G_Reg = self.criterionReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
 
         # combine loss and calculate gradients
-        self.loss_G = self.loss_G_GAN + self.loss_G_L1  # + self.loss_G_Reg
+        self.loss_G = self.loss_G_GAN + \
+                      self.loss_G_L1 * self.first_phase_coeff + \
+                      loss_G_Reg * (1 - self.first_phase_coeff)
         self.loss_G.backward()
 
     def normalize_vector_angle(self, output):
@@ -156,23 +162,8 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
                                                self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
         self.loss_Reg_real = self.criterionReg(self.reg_B_params,
                                                self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
-        # self.loss_Reg_real = torch.nn.functional.mse_loss(self.reg_B_params, self.gt_vector * 10)
 
-        reg_B_params_n = self.normalize_vector_angle(self.reg_B_params)
-        loss_Reg_real_n = self.criterionReg(reg_B_params_n, self.gt_vector) * self.opt.lambda_Reg
-        tmp_affine_B = affine_transform.tensor_vector_to_matrix(reg_B_params_n.detach())
-        tmp_affine_gt = affine_transform.tensor_vector_to_matrix(self.gt_vector)
-
-        tmp_vector_B = affine_transform.tensor_matrix_to_vector(tmp_affine_B)
-        print(f'--------- abs loss {torch.mean(torch.abs(reg_B_params_n - self.gt_vector)).detach().cpu().numpy()}, '
-              f'geodesic loss {self.loss_Reg_real}, '
-              f'diff of rotation matrix {torch.mean(torch.abs(tmp_affine_gt - tmp_affine_B)).cpu().numpy()}'
-              f'geodesic loss normalized {loss_Reg_real_n}')
-        print(f'--------- inference first row {reg_B_params_n[0, ...].flatten().detach().cpu().numpy()},'
-              f' GT first row {self.gt_vector[0, ...].flatten().cpu().numpy()}'
-              f' tmp vector B {tmp_vector_B[0, ...].flatten().detach().cpu().numpy()}')
-
-        self.loss_Reg = self.loss_Reg_real  # + self.loss_Reg_fake
+        self.loss_Reg = self.loss_Reg_real + self.loss_Reg_fake * (1 - self.first_phase_coeff)
         self.loss_Reg.backward()
 
     def optimize_parameters(self):
@@ -196,7 +187,7 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         self.optimizer_Reg.step()
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        reg_A = affine_transform.transform_image(self.fake_B,
+        reg_A = affine_transform.transform_image(self.real_B,
                                                  affine_transform.tensor_vector_to_matrix(self.reg_A_params.detach()),
                                                  device=self.real_B.device)
 
@@ -242,3 +233,8 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
 
         self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
         self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
+
+    def update_learning_rate(self, epoch=0):
+        super(Pix2Pix3dRegModel, self).update_learning_rate(epoch)
+        if epoch > self.opt.L1_epochs:
+            self.first_phase_coeff = 0
