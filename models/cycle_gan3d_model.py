@@ -1,3 +1,8 @@
+###############################################################################
+# Code originally developed by "Amos Newswanger" (neoamos). Check this repo:
+# https://github.com/neoamos/3d-pix2pix-CycleGAN/
+###############################################################################
+
 import torch
 import itertools
 from util.image_pool import ImagePool
