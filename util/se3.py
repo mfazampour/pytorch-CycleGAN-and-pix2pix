@@ -121,4 +121,12 @@ def grad(y_pred, y_true,
 def vector_to_matrix(vector):
     return SE3.matrix_from_vector(vector)
 
+def matrix_to_rot_vector(matrix):
+    return SO3.rotation_vector_from_matrix(matrix)
+
+def matrix_to_vector(matrix):
+    rot = matrix_to_rot_vector(matrix[:3, :3])
+    trans = matrix[:3, 3]
+    return gs.hstack([rot.unsqueeze(0), trans.unsqueeze(0)]).squeeze()
+
 

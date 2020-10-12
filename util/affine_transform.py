@@ -32,8 +32,8 @@ def transform_image(img: torch.Tensor, transform, device):
     -------
     transformed image
     """
-    grid = F.affine_grid(transform[:, :3, :], img.shape).to(device)
-    x_trans = F.grid_sample(img, grid, padding_mode='border')
+    grid = F.affine_grid(transform[:, :3, :], img.shape, align_corners=False).to(device)
+    x_trans = F.grid_sample(img, grid, padding_mode='border', align_corners=False)
     # x_trans = torch.tensor(x_trans.view(1,9,256,256))
     return x_trans
 
@@ -54,14 +54,14 @@ def create_random_affine(n, img_shape=torch.tensor([128.0, 128.0, 128.0]), dtype
     affine
     vector
     """
-    rotation = torch.rand((n, 3), dtype=dtype) * 0.2
-    translation = torch.rand((n, 3), dtype=dtype) * 5
-    translation /= torch.tensor(img_shape, dtype=translation.dtype, device=translation.device)
+    rotation = torch.rand((n, 3), dtype=dtype) * 0.4
+    translation = torch.rand((n, 3), dtype=dtype) * 0.2
     vector = torch.cat((rotation, translation), dim=1)
     affines = torch.zeros((n, 4, 4), dtype=dtype)
     for i in range(n):
         affine = se3.vector_to_matrix(vector[i, :])
         affines[i, ...] = affine
+    # vector[:, -3:] *= torch.tensor(img_shape, dtype=translation.dtype, device=translation.device)
     return affines.to(device), vector.to(device)
 
 
@@ -71,6 +71,13 @@ def tensor_vector_to_matrix(t: torch.Tensor):
         affine = se3.vector_to_matrix(t[i, :].cpu())
         affines[i, ...] = affine
     return affines.to(t.device)
+
+def tensor_matrix_to_vector(t: torch.Tensor):
+    vectors = torch.zeros((t.shape[0], 6), dtype=t.dtype)
+    for i in range(t.shape[0]):
+        vector = se3.matrix_to_vector(t[i, :].cpu())
+        vectors[i, ...] = vector
+    return vectors.to(t.device)
 
 def show_volumes(img_list: List[torch.Tensor]):
     img_list_np = []

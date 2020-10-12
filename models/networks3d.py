@@ -676,7 +676,7 @@ class NormalNet(nn.Module):
         sequence += [nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]
 
         sequence += [nn.Flatten(),
-                     nn.Linear(343, num_classes)]
+                     nn.Linear(343, num_classes, bias=False)]
 
         self.model = nn.Sequential(*sequence)
 
