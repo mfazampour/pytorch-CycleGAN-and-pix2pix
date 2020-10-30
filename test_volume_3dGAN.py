@@ -138,7 +138,12 @@ if __name__ == '__main__':
             # store the segmentations too
             vol = F.softmax(model.seg_B, dim=1)[:, 1, ...].cpu().numpy()
             vol = vol >= 0.5
-            file_name = f'volumes/fake_{patient_name}_seg.mhd'
+            file_name = f'volumes/{patient_name}_fake_seg.mhd'
+            save_image(vol, file_name, transform_label)
+
+            vol = F.softmax(model.seg_A, dim=1)[:, 1, ...].cpu().numpy()
+            vol = vol >= 0.5
+            file_name = f'volumes/{patient_name}_real_seg.mhd'
             save_image(vol, file_name, transform_label)
 
         if isinstance(model, Pix2Pix3dRegModel):
