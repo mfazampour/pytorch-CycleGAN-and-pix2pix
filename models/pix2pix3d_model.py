@@ -38,6 +38,7 @@ class Pix2Pix3dModel(BaseModel):
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no_lsgan', type=bool, default=False)
+            parser.add_argument('--lambda_MIND', type=float, default=10.0, help='weight for MIND loss')
             # parser.add_argument('--visualize_volume', type=bool, default=False)
 
         return parser
@@ -59,7 +60,7 @@ class Pix2Pix3dModel(BaseModel):
 
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
-        self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake']
+        self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake', 'MIND']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
         # the empty slice is added since the visualization would be 3 * 4
@@ -86,6 +87,7 @@ class Pix2Pix3dModel(BaseModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)
             self.criterionL1 = torch.nn.L1Loss()
+            self.criterionMIND = networks3d.MIND()
 
             # initialize optimizers
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
@@ -132,8 +134,10 @@ class Pix2Pix3dModel(BaseModel):
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
         # Second, G(A) = B
         self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
+        # Third, MIND(G(A)) == MIND(A)
+        self.loss_MIND = self.criterionMIND(self.fake_B, self.real_A) * self.opt.lambda_MIND
         # combine loss and calculate gradients
-        self.loss_G = self.loss_G_GAN + self.loss_G_L1
+        self.loss_G = self.loss_G_GAN + self.loss_G_L1 + self.loss_MIND
         self.loss_G.backward()
 
     def optimize_parameters(self):
