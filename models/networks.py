@@ -5,6 +5,7 @@ import functools
 from torch.optim import lr_scheduler
 import torch.nn.functional as F
 
+from util import se3
 
 ###############################################################################
 # Helper Functions
@@ -825,3 +826,59 @@ class DiceLoss(nn.Module):
                 total_loss += dice_loss
 
         return total_loss / target.shape[1]
+
+
+######################################################################
+## Registration loss
+######################################################################
+
+# Inherit from Function
+class SE3LossFunction(torch.autograd.Function):
+
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    def forward(ctx, y_pred: torch.Tensor, y_target: torch.Tensor):
+        ctx.save_for_backward(y_pred, y_target)
+        output = se3.loss(y_pred.detach().cpu(), y_target.cpu())
+        return torch.tensor(output, dtype=y_pred.dtype, device=y_pred.device)
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        # This is a pattern that is very convenient - at the top of backward
+        # unpack saved_tensors and initialize all gradients w.r.t. inputs to
+        # None. Thanks to the fact that additional trailing Nones are
+        # ignored, the return statement is simple even when the function has
+        # optional inputs.
+        y_pred, y_target = ctx.saved_tensors
+        grad = se3.grad(y_pred.detach().cpu(), y_target.cpu())
+        return torch.tensor(grad, dtype=y_pred.dtype, device=y_pred.device) * grad_output.unsqueeze(1), None
+
+
+class RegistrationLoss(nn.Module):
+
+    def __init__(self, reduction='mean'):
+        super(RegistrationLoss, self).__init__()
+        self.reduction = reduction
+
+    def forward(self, predict: torch.Tensor, target: torch.Tensor):
+        """
+
+        Parameters
+        ----------
+        predict: network output prediction tensor with shape N*6
+        target: Target tensor with shape N*6
+
+        Returns
+        -------
+        SE3 loss between the set of the poses
+        """
+        loss = SE3LossFunction.apply(predict, target)
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        elif self.reduction == 'none':
+            return loss
+        else:
+            raise Exception('Unexpected reduction {}'.format(self.reduction))

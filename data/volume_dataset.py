@@ -17,7 +17,8 @@ from torchio.transforms import (
     Crop,
     Resample,
     Pad,
-    RandomFlip
+    RandomFlip,
+    CropOrPad
 )
 import napari
 
@@ -28,8 +29,7 @@ def load_image_file(path: str) -> np.ndarray:
 
 
 class VolumeDataset(BaseDataset):
-    """Add flag to visualize the 3D volume
-    """
+
     @staticmethod
     def modify_commandline_options(parser, is_train):
         """Add new dataset-specific options, and rewrite default values for existing options.
@@ -64,7 +64,7 @@ class VolumeDataset(BaseDataset):
         # self.mr = {}
         # self.trus = {}
 
-        assert(self.opt.load_size >= self.opt.crop_size)   # crop_size should be smaller than the size of loaded image
+        assert (self.opt.load_size >= self.opt.crop_size)  # crop_size should be smaller than the size of loaded image
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
         self.output_nc = self.opt.input_nc if self.opt.direction == 'BtoA' else self.opt.output_nc
 
@@ -88,17 +88,17 @@ class VolumeDataset(BaseDataset):
             )
             transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
 
-        self.ratio = self.min_size/np.max(self.input_size)
+        self.ratio = self.min_size / np.max(self.input_size)
         transforms.append(Resample(self.ratio))
-        crop_size = list(((np.array([85, 66, 79]) / self.ratio - self.input_size)/2).astype(np.int))
-        transforms.append(Crop(crop_size))
+        # crop_size = list(((np.array([85, 66, 79]) / self.ratio - self.input_size) / 2).astype(np.int))
+        transforms.append(CropOrPad(self.input_size))
         transform = Compose(transforms)
         return transform
 
     def reverse_resample(self, min_value=-1):
-        transforms = [Resample(1/self.ratio)]
-        pad_size = list(np.ceil((np.array([85, 66, 79]) - np.asarray(self.input_size) * self.ratio) / 2).astype(np.int))
-        return Compose(transforms + [Pad(pad_size, padding_mode=min_value)])
+        transforms = [Resample(1 / self.ratio)]
+        # pad_size = list(np.ceil((np.array([85, 66, 79]) - np.asarray(self.input_size) * self.ratio) / 2).astype(np.int))
+        return Compose(transforms + [CropOrPad([85, 66, 79], padding_mode=min_value)])
 
     def read_list_of_patients(self):
         patients = []
@@ -110,18 +110,17 @@ class VolumeDataset(BaseDataset):
 
     def __getitem__(self, index):
         sample, subject = self.load_subject_(index)
-
         transformed_ = self.transform(subject)
 
         if self.opt.visualize_volume:
             with napari.gui_qt():
                 napari.view_image(np.stack([transformed_['mr'].data.squeeze().numpy(),
-                                                     transformed_['trus'].data.squeeze().numpy()]))
+                                            transformed_['trus'].data.squeeze().numpy()]))
 
         dict_ = {
             'A': transformed_['mr'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
             'B': transformed_['trus'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
-            'Patient': sample.split('/')[-4],
+            'Patient': sample.split('/')[-4].replace(' ', ''),
             'A_paths': sample + "/mr.mhd",
             'B_paths': sample + "/trus.mhd"
         }
@@ -131,12 +130,11 @@ class VolumeDataset(BaseDataset):
         return dict_
 
     def load_subject_(self, index):
-        # returns samples of dimension [channels, z, x, y]
         sample = self.patients[index % len(self.patients)]
-        # data_folder = '/preprocessed/cropped/'
+
         # load mr and turs file if it hasn't already been loaded
         if sample not in self.subjects:
-            print(f'loading patient {sample}')
+            # print(f'loading patient {sample}')
             if self.load_mask:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
                                           trus=torchio.ScalarImage(sample + "/trus.mhd"),
@@ -149,7 +147,10 @@ class VolumeDataset(BaseDataset):
         return sample, subject
 
     def __len__(self):
-        return 5 * len(self.patients)
+        if self.opt.isTrain:
+            return 5 * len(self.patients)
+        else:
+            return len(self.patients)
 
     def name(self):
         return 'VolumeDataset'
