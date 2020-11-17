@@ -852,7 +852,7 @@ class SE3LossFunction(torch.autograd.Function):
         # optional inputs.
         y_pred, y_target = ctx.saved_tensors
         grad = se3.grad(y_pred.detach().cpu(), y_target.cpu())
-        return torch.tensor(grad, dtype=y_pred.dtype, device=y_pred.device) * grad_output.unsqueeze(1), None
+        return (grad.to(y_pred.device) * grad_output.view((y_pred.shape[0], 1))).view(y_pred.shape), None
 
 
 class RegistrationLoss(nn.Module):
@@ -882,3 +882,36 @@ class RegistrationLoss(nn.Module):
             return loss
         else:
             raise Exception('Unexpected reduction {}'.format(self.reduction))
+
+
+##########################################################################
+## Regularization loss (Deformation Gradient loss)
+##
+##########################################################################
+
+class GradLoss(nn.Module):
+    """
+    N-D gradient loss.
+    """
+
+    def __init__(self, penalty='l1', loss_mult=None):
+        super().__init__()
+        self.penalty = penalty
+        self.loss_mult = loss_mult
+
+    def forward(self, predict: torch.Tensor, target: torch.Tensor):
+        dy = torch.abs(predict[:, :, 1:, :, :] - predict[:, :, :-1, :, :])
+        dx = torch.abs(predict[:, :, :, 1:, :] - predict[:, :, :, :-1, :])
+        dz = torch.abs(predict[:, :, :, :, 1:] - predict[:, :, :, :, :-1])
+
+        if self.penalty == 'l2':
+            dy = dy * dy
+            dx = dx * dx
+            dz = dz * dz
+
+        d = torch.mean(dx) + torch.mean(dy) + torch.mean(dz)
+        grad = d / 3.0
+
+        if self.loss_mult is not None:
+            grad *= self.loss_mult
+        return grad
