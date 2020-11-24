@@ -166,6 +166,10 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.visual_names += ['reg_A_center_axi', 'diff_A_center_axi', 'reg_B_center_axi', 'diff_B_center_axi']
         self.visual_names += ['diff_orig_center_sag', 'diff_orig_center_cor', 'diff_orig_center_axi', 'empty_img_4']
         self.visual_names += ['deformed_center_sag', 'deformed_center_cor', 'deformed_center_axi', 'empty_img_5']
+        self.visual_names += ['mask_A_center_sag', 'seg_A_center_sag', 'seg_B_center_sag', 'empty_img_6']
+        self.visual_names += ['mask_A_center_cor', 'seg_A_center_cor', 'seg_B_center_cor', 'empty_img_7']
+        self.visual_names += ['mask_A_center_axi', 'seg_A_center_axi', 'seg_B_center_axi', 'empty_img_8']
+
 
     # def name(self):
     #     return 'Pix2Pix3dModel'
@@ -274,6 +278,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
             self.loss_DefReg_fake = torch.tensor([0.0])
         self.loss_DefRgl = self.criterionDefRgl(dvf, None)
         self.loss_DefReg += self.loss_DefRgl
+        self.loss_DefReg *= (1 - self.first_phase_coeff)
 
         seg_B = self.netSeg(deformed_B)
         self.loss_Seg_real = self.criterionSeg(seg_B, self.mask_A)
@@ -281,43 +286,9 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         seg_fake_B = self.netSeg(self.fake_B.detach())
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
 
-        self.loss_Seg = self.loss_Seg_real + self.loss_Seg_fake
+        self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
         # self.loss_DefReg.backward()
         (self.loss_DefReg + self.loss_Seg).backward()
-
-
-    def backward_DefReg(self):
-
-        def_reg_output = self.netDefReg(self.real_B, self.fake_B.detach())
-        if self.opt.bidir:
-            (deformed_B, deformed_fake_B, dvf) = def_reg_output
-        else:
-            (deformed_B, dvf) = def_reg_output
-
-        self.loss_DefReg_real = self.criterionDefReg(deformed_B, self.fake_B.detach())  # TODO add weights same as vxm!
-        self.loss_DefReg = self.loss_DefReg_real
-        if self.opt.bidir:
-            self.loss_DefReg_fake = self.criterionDefReg(deformed_fake_B, self.real_B)
-            self.loss_DefReg += self.loss_DefReg_fake
-        self.loss_DefRgl = self.criterionDefRgl(dvf, None)
-        self.loss_DefReg += self.loss_DefRgl
-        self.loss_DefReg.backward()
-
-    def backward_Seg(self):
-        """
-        Calculate Segmentation loss to update the segmentation networks
-        Returns
-        -------
-        """
-        self.loss_Seg_real = self.criterionSeg(self.seg_B, self.mask_A)
-        # self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
-
-        seg_fake_B = self.netSeg(self.fake_B.detach())
-        self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
-        # self.seg_fake_B = torch.argmax(seg_fake_B, dim=1, keepdim=True)
-
-        self.loss_Seg = self.loss_Seg_real + self.loss_Seg_fake
-        self.loss_Seg.backward()
 
     def optimize_parameters(self):
         self.forward()  # compute fake images: G(A), rigid registration params, DVF and segmentation mask
@@ -349,19 +320,6 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.bacward_DefReg_Seg()
         self.optimizer_DefReg.step()
         self.optimizer_Seg.step()
-
-
-        # # update deformable registration network
-        # self.set_requires_grad(self.netDefReg, True)
-        # self.optimizer_DefReg.zero_grad()
-        # self.backward_DefReg()
-        # self.optimizer_DefReg.step()
-        #
-        # # update segmentation network
-        # self.set_requires_grad(self.netSeg, True)
-        # self.optimizer_Seg.zero_grad()
-        # self.backward_Seg()
-        # self.optimizer_Seg.step()
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
@@ -410,6 +368,29 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
         self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
         self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
+
+        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
+        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
+
+        n_c = self.real_A.shape[2]
+        # average over channel to get the real and fake image
+        self.mask_A_center_sag = self.mask_A[:, :, int(n_c / 2), ...]
+        self.seg_A_center_sag = self.seg_fake_B[:, :, int(n_c / 2), ...]
+        self.seg_B_center_sag = self.seg_B[:, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[3]
+        self.mask_A_center_cor = self.mask_A[:, :, :, int(n_c / 2), ...]
+        self.seg_A_center_cor = self.seg_fake_B[:, :, :, int(n_c / 2), ...]
+        self.seg_B_center_cor = self.seg_B[:, :, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[4]
+        self.mask_A_center_axi = self.mask_A[..., int(n_c / 2)]
+        self.seg_A_center_axi = self.seg_fake_B[..., int(n_c / 2)]
+        self.seg_B_center_axi = self.seg_B[..., int(n_c / 2)]
+
+        self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_7 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_8 = torch.zeros_like(self.real_A_center_axi)
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch)
