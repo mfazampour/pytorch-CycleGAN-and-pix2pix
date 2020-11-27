@@ -98,7 +98,7 @@ class VolumeDataset(BaseDataset):
         # clip_intensity = Lambda(VolumeDataset.clip_image, types_to_apply=[torchio.INTENSITY])
         # transforms.append(clip_intensity)
 
-        rescale = RescaleIntensity((-1, 1), percentiles=(2, 98))
+        rescale = RescaleIntensity((-1, 1), percentiles=(1, 99))
         # normalize with mu = 0 and sigma = 1/3 to have data in -1...1 almost
         # ZNormalization()
 
