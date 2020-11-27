@@ -18,7 +18,9 @@ from torchio.transforms import (
     Resample,
     Pad,
     RandomFlip,
-    CropOrPad
+    CropOrPad,
+    ZNormalization,
+    Lambda
 )
 import napari
 
@@ -45,6 +47,12 @@ class VolumeDataset(BaseDataset):
         parser.add_argument('--visualize_volume', type=bool, default=False, help='Set visualize to False. it\'s only '
                                                                                  'used for debugging.')
         parser.add_argument('--load_mask', type=bool, default=False, help='load prostate mask for seg. loss')
+        parser.add_argument('--inshape', type=int, nargs='+', default=[128] * 3,
+                            help='after cropping shape of input. '
+                                 'default is equal to image size. specify if the input can\'t path through UNet')
+        parser.add_argument('--origshape', type=int, nargs='+', default=[80] * 3,
+                            help='original shape of input images')
+        parser.add_argument('--min_size', type=int, default=80, help='minimum length of the axes')
         return parser
 
     def __init__(self, opt):
@@ -68,42 +76,61 @@ class VolumeDataset(BaseDataset):
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
         self.output_nc = self.opt.input_nc if self.opt.direction == 'BtoA' else self.opt.output_nc
 
-        self.input_size = [128] * 3
-        self.min_size = 64
+        self.input_size = opt.inshape
+        self.min_size = opt.min_size
 
         self.transform = self.create_transforms()
 
+        self.means = []
+        self.std = []
+
+    @staticmethod
+    def clip_image(x: torch.Tensor):
+        [l, h] = np.quantile(x.cpu().numpy(), [0.02, 0.98])
+        x[x < l] = l
+        x[x > h] = h
+        return x
+
     def create_transforms(self):
-        # Let's use one preprocessing transform and one augmentation transform
-        # This transform will be applied only to scalar images:
-        rescale = RescaleIntensity((-1, 1))
-        transforms = [rescale]
-        # As RandomAffine is faster then RandomElasticDeformation, we choose to
-        # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
-        # Also, there is a 25% chance that none of them will be applied
-        if self.opt.isTrain:
-            spatial = OneOf(
-                {RandomAffine(translation=5): 0.8, RandomElasticDeformation(): 0.2},
-                p=0.75,
-            )
-            transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
+        transforms = []
+
+        # clipping to remove outliers (if any)
+        # clip_intensity = Lambda(VolumeDataset.clip_image, types_to_apply=[torchio.INTENSITY])
+        # transforms.append(clip_intensity)
+
+        rescale = RescaleIntensity((-1, 1), percentiles=(2, 98))
+        # normalize with mu = 0 and sigma = 1/3 to have data in -1...1 almost
+        # ZNormalization()
+
+        transforms.append(rescale)
+
+        # transforms = [rescale]
+        # # As RandomAffine is faster then RandomElasticDeformation, we choose to
+        # # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
+        # # Also, there is a 25% chance that none of them will be applied
+        # if self.opt.isTrain:
+        #     spatial = OneOf(
+        #         {RandomAffine(translation=5): 0.8, RandomElasticDeformation(): 0.2},
+        #         p=0.75,
+        #     )
+        #     transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
 
         self.ratio = self.min_size / np.max(self.input_size)
         transforms.append(Resample(self.ratio))
-        # crop_size = list(((np.array([85, 66, 79]) / self.ratio - self.input_size) / 2).astype(np.int))
         transforms.append(CropOrPad(self.input_size))
         transform = Compose(transforms)
         return transform
 
     def reverse_resample(self, min_value=-1):
         transforms = [Resample(1 / self.ratio)]
-        # pad_size = list(np.ceil((np.array([85, 66, 79]) - np.asarray(self.input_size) * self.ratio) / 2).astype(np.int))
-        return Compose(transforms + [CropOrPad([85, 66, 79], padding_mode=min_value)])
+        return Compose(transforms + [CropOrPad(self.opt.origshape, padding_mode=min_value)])
 
     def read_list_of_patients(self):
         patients = []
         for root, dirs, files in os.walk(self.root):
             if ('nonrigid' in root) or ('cropped' not in root):
+                continue
+            if 'trus.mhd' not in files:
                 continue
             patients.append(root)
         return patients
@@ -148,14 +175,9 @@ class VolumeDataset(BaseDataset):
 
     def __len__(self):
         if self.opt.isTrain:
-            return 5 * len(self.patients)
+            return len(self.patients)
         else:
             return len(self.patients)
 
     def name(self):
         return 'VolumeDataset'
-
-
-class UnalignedVolumeDataset(VolumeDataset):
-    # TODO: check if actually it makes sense to define this unaligned class
-    pass

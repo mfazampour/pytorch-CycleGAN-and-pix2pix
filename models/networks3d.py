@@ -340,8 +340,9 @@ class ResnetGenerator3d(nn.Module):
 
 
 #############################
-#
 # 3D version of UnetGenerator
+# ###########################
+
 class UnetGenerator3d(nn.Module):
     def __init__(self, input_nc, output_nc, num_downs, ngf=64,
                  norm_layer=nn.BatchNorm3d, use_dropout=False, last_layer=nn.Tanh(), is_seg_net=False):
