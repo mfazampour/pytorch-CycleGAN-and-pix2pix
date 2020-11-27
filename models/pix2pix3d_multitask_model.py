@@ -58,22 +58,21 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         parser.add_argument('--flow-logsigma-bias', type=float, default=-10,
                             help='negative value for initialization of the logsigma layer bias value')
         parser.add_argument('--netSeg', type=str, default='unet_128', help='Type of network used for segmentation')
-        parser.add_argument('--num_classes', type=int, default=2, help='num of classes for segmentation')
+        parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
 
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
-            parser.add_argument('--no_lsgan', type=bool, default=False)
+            parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
-            parser.add_argument('--lr_Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
-            parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lr-Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lambda-Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lambda-Def', type=float, default=1.0, help='weight for the segmentation loss')
+            parser.add_argument('--lr-Def', type=float, default=0.00001, help='learning rate for the reg. network opt.')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
                                 help='image reconstruction loss - can be mse or ncc (default: mse)')
-            parser.add_argument('--inshape', type=int, nargs='+',
-                                help='after cropping shape of input. '
-                                     'default is equal to image size. specify if the input can\'t path through UNet')
 
         return parser
 
@@ -102,9 +101,9 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
                                                        betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_RigidReg)
 
-            self.criterionDefReg = torch.nn.MSELoss()  # TODO change later to sth more meaningful (LNCC?!)
+            self.criterionDefReg = torch.nn.MSELoss()  # TODO change later to sth more meaningful (LCC?!)
             self.criterionDefRgl = networks.GradLoss('l2', loss_mult=opt.int_downsize)
-            self.optimizer_DefReg = torch.optim.Adam(self.netDefReg.parameters(), lr=opt.lr_Reg)
+            self.optimizer_DefReg = torch.optim.Adam(self.netDefReg.parameters(), lr=opt.lr_Def)
             self.optimizers.append(self.optimizer_DefReg)
 
             self.criterionSeg = networks.DiceLoss()
@@ -199,6 +198,18 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
         self.mask_A = input['A_mask'].to(self.device)
 
+        ###
+        self.loss_DefReg_real = torch.tensor([0.0])
+        self.loss_DefReg = torch.tensor([0.0])
+        self.loss_DefReg_fake = torch.tensor([0.0])
+
+        self.loss_DefReg_fake = torch.tensor([0.0])
+        self.loss_DefRgl = torch.tensor([0.0])
+        self.loss_Seg_real = torch.tensor([0.0])
+        self.loss_Seg_fake = torch.tensor([0.0])
+
+        self.loss_Seg = torch.tensor([0.0])
+
     def forward(self):
         super().forward()
         self.reg_A_params = self.netRigidReg(torch.cat([self.fake_B, self.transformed_B], dim=1))
@@ -288,7 +299,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
         # self.loss_DefReg.backward()
-        (self.loss_DefReg + self.loss_Seg).backward()
+        (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
 
     def optimize_parameters(self):
         self.forward()  # compute fake images: G(A), rigid registration params, DVF and segmentation mask
@@ -313,6 +324,8 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.optimizer_RigidReg.step()
 
         # update deformable registration and segmentation network
+        if (1 - self.first_phase_coeff) == 0:
+            return
         self.set_requires_grad(self.netDefReg, True)
         self.set_requires_grad(self.netSeg, True)
         self.optimizer_DefReg.zero_grad()
