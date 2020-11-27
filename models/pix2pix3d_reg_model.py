@@ -34,17 +34,17 @@ class Pix2Pix3dRegModel(Pix2Pix3dModel):
         """
         parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='volume')
         parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
-        parser.add_argument('--num_classes', type=int, default=2, help='num of classes for segmentation')
-        parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
+        parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
 
-        parser.add_argument('--L1_epochs', type=int, default=15,
+
+        parser.add_argument('--L1-epochs', type=int, default=15,
                             help='number of epochs to train the network with the L1 loss before reg loss is used')
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
-            parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
-            parser.add_argument('--no_lsgan', type=bool, default=False)
-            parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
-            parser.add_argument('--lr_Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lambda-L1', type=float, default=100.0, help='weight for L1 loss')
+            parser.add_argument('--no-lsgan', type=bool, default=False)
+            parser.add_argument('--lambda-Reg', type=float, default=0.5, help='weight for the registration loss')
+            parser.add_argument('--lr-Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
             # parser.add_argument('--visualize_volume', type=bool, default=False)
 
         return parser

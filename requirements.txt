@@ -14,3 +14,4 @@ requests
 opencv-python
 matplotlib
 geomstats
+voxelmorph

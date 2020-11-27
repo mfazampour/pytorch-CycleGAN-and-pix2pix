@@ -31,13 +31,13 @@ class Pix2Pix3dSegModel(Pix2Pix3dModel):
         """
         parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='volume')
         parser.add_argument('--netSeg', type=str, default='unet_128', help='Type of network used for segmentation')
-        parser.add_argument('--num_classes', type=int, default=2, help='num of classes for segmentation')
+        parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
 
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
-            parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
-            parser.add_argument('--no_lsgan', type=bool, default=False)
-            parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lambda-L1', type=float, default=100.0, help='weight for L1 loss')
+            parser.add_argument('--no-lsgan', type=bool, default=False)
+            parser.add_argument('--lambda-Seg', type=float, default=0.5, help='weight for the segmentation loss')
             # parser.add_argument('--visualize_volume', type=bool, default=False)
 
         return parser
