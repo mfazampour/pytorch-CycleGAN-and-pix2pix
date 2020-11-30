@@ -159,15 +159,26 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
-        # the empty slice is added since the visualization would be 3 * 4
-        self.visual_names += ['reg_A_center_sag', 'diff_A_center_sag', 'reg_B_center_sag', 'diff_B_center_sag']
-        self.visual_names += ['reg_A_center_cor', 'diff_A_center_cor', 'reg_B_center_cor', 'diff_B_center_cor']
-        self.visual_names += ['reg_A_center_axi', 'diff_A_center_axi', 'reg_B_center_axi', 'diff_B_center_axi']
-        self.visual_names += ['diff_orig_center_sag', 'diff_orig_center_cor', 'diff_orig_center_axi', 'empty_img_4']
-        self.visual_names += ['deformed_center_sag', 'deformed_center_cor', 'deformed_center_axi', 'empty_img_5']
-        self.visual_names += ['mask_A_center_sag', 'seg_A_center_sag', 'seg_B_center_sag', 'empty_img_6']
-        self.visual_names += ['mask_A_center_cor', 'seg_A_center_cor', 'seg_B_center_cor', 'empty_img_7']
-        self.visual_names += ['mask_A_center_axi', 'seg_A_center_axi', 'seg_B_center_axi', 'empty_img_8']
+
+        self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
+        self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
+        self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
+
+        # rigid registration
+        self.visual_names += ['diff_A_center_sag', 'diff_A_center_cor', 'diff_A_center_axi']
+        self.visual_names += ['diff_B_center_sag', 'diff_B_center_cor', 'diff_B_center_axi']
+        self.visual_names += ['diff_orig_center_sag', 'diff_orig_center_cor', 'diff_orig_center_axi']
+        self.visual_names += ['deformed_center_sag', 'deformed_center_cor', 'deformed_center_axi']
+
+        # segmentation
+        self.visual_names += ['mask_A_center_sag', 'mask_A_center_cor', 'mask_A_center_axi']
+        self.visual_names += ['seg_A_center_sag', 'seg_A_center_cor', 'seg_A_center_axi']
+        self.visual_names += ['seg_B_center_sag', 'seg_B_center_cor', 'seg_B_center_axi']
+
+        # deformable registration
+        self.visual_names += ['dvf_center_sag', 'dvf_center_cor', 'dvf_center_axi']
+        self.visual_names += ['deformed_B_center_sag', 'deformed_B_center_cor', 'deformed_B_center_axi']
+
 
 
     # def name(self):
@@ -221,8 +232,8 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         else:
             (self.deformed_B, self.dvf) = def_reg_output
 
-        # if self.isTrain:
-        #     self.dvf = self.resizer(self.dvf)
+        if self.isTrain:
+            self.dvf = self.resizer(self.dvf)
         self.seg_B = self.netSeg(self.deformed_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
 
@@ -379,9 +390,6 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.diff_orig_center_axi = diff_orig[..., int(n_c / 2)]
         self.deformed_center_axi = self.transformed_B[..., int(n_c / 2)]
 
-        self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
-
         self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
         self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
 
@@ -401,9 +409,17 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.seg_A_center_axi = self.seg_fake_B[..., int(n_c / 2)]
         self.seg_B_center_axi = self.seg_B[..., int(n_c / 2)]
 
-        self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_7 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_8 = torch.zeros_like(self.real_A_center_axi)
+        n_c = int(self.real_A.shape[2] / 2)
+        self.dvf_center_sag = self.dvf[:, :, n_c, ...]
+        self.deformed_B_center_sag = self.deformed_B[:, :, n_c, ...]
+
+        n_c = int(self.real_A.shape[3] / 2)
+        self.dvf_center_cor = self.dvf[:, :, ..., n_c, :]
+        self.deformed_B_center_cor = self.deformed_B[..., n_c, :]
+
+        n_c = int(self.real_A.shape[4] / 2)
+        self.dvf_center_axi = self.dvf[:, :, ..., n_c]
+        self.deformed_B_center_axi = self.deformed_B[..., n_c]
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch)
