@@ -55,6 +55,7 @@ class BaseOptions():
         parser.add_argument('--verbose', action='store_true', help='if specified, print more debugging information')
         parser.add_argument('--suffix', default='', type=str, help='customized suffix: opt.name = opt.name + suffix: e.g., {model}_{netG}_size{load_size}')
         parser.add_argument('--is_train', type=bool, default=True, help='change if we are running in test mode')
+        parser.add_argument('--tensorboard_path', type=str, default='/tmp/tensorboard/', help='path to store tensorboard logs')
         self.initialized = True
         return parser
 

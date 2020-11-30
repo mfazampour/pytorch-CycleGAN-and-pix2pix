@@ -13,6 +13,7 @@ from .pix2pix3d_model import Pix2Pix3dModel
 from . import networks3d
 from . import networks
 from util import affine_transform
+from torch.utils.tensorboard import SummaryWriter
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
@@ -361,33 +362,33 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
         reg_A, reg_B = self.get_transformed_images()
 
-        diff_A = reg_A - self.transformed_B
-        diff_B = reg_B - self.transformed_B
-        diff_orig = self.real_B - self.transformed_B
+        self.diff_A = reg_A - self.transformed_B
+        self.diff_B = reg_B - self.transformed_B
+        self.diff_orig = self.real_B - self.transformed_B
 
         n_c = self.real_A.shape[2]
 
         self.reg_A_center_sag = reg_A[:, :, int(n_c / 2), ...]
-        self.diff_A_center_sag = diff_A[:, :, int(n_c / 2), ...]
+        self.diff_A_center_sag = self.diff_A[:, :, int(n_c / 2), ...]
         self.reg_B_center_sag = reg_B[:, :, int(n_c / 2), ...]
-        self.diff_B_center_sag = diff_B[:, :, int(n_c / 2), ...]
-        self.diff_orig_center_sag = diff_orig[:, :, int(n_c / 2), ...]
+        self.diff_B_center_sag = self.diff_B[:, :, int(n_c / 2), ...]
+        self.diff_orig_center_sag = self.diff_orig[:, :, int(n_c / 2), ...]
         self.deformed_center_sag = self.transformed_B[:, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[3]
         self.reg_A_center_cor = reg_A[:, :, :, int(n_c / 2), ...]
-        self.diff_A_center_cor = diff_A[:, :, :, int(n_c / 2), ...]
+        self.diff_A_center_cor = self.diff_A[:, :, :, int(n_c / 2), ...]
         self.reg_B_center_cor = reg_B[:, :, :, int(n_c / 2), ...]
-        self.diff_B_center_cor = diff_B[:, :, :, int(n_c / 2), ...]
-        self.diff_orig_center_cor = diff_orig[:, :, :, int(n_c / 2), ...]
+        self.diff_B_center_cor = self.diff_B[:, :, :, int(n_c / 2), ...]
+        self.diff_orig_center_cor = self.diff_orig[:, :, :, int(n_c / 2), ...]
         self.deformed_center_cor = self.transformed_B[:, :, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[4]
         self.reg_A_center_axi = reg_A[..., int(n_c / 2)]
-        self.diff_A_center_axi = diff_A[..., int(n_c / 2)]
+        self.diff_A_center_axi = self.diff_A[..., int(n_c / 2)]
         self.reg_B_center_axi = reg_B[..., int(n_c / 2)]
-        self.diff_B_center_axi = diff_B[..., int(n_c / 2)]
-        self.diff_orig_center_axi = diff_orig[..., int(n_c / 2)]
+        self.diff_B_center_axi = self.diff_B[..., int(n_c / 2)]
+        self.diff_orig_center_axi = self.diff_orig[..., int(n_c / 2)]
         self.deformed_center_axi = self.transformed_B[..., int(n_c / 2)]
 
         self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
@@ -425,3 +426,25 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         super().update_learning_rate(epoch)
         if epoch > self.opt.L1_epochs:
             self.first_phase_coeff = 0
+
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+        axs, fig = vxm.torch.utils.init_figure(3, 12)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[3, :], img_name='Diff A')
+        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[4, :], img_name='Diff B')
+        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[5, :], img_name='Diff Orig')
+        vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[6, :], img_name='Transformed')
+        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[7, :], img_name='Mask A')
+        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[8, :], img_name='Seg Fake')
+        vxm.torch.utils.fill_subplots(self.seg_B.cpu(), axs=axs[9, :], img_name='Seg B')
+        vxm.torch.utils.fill_subplots(self.dvf.cpu().detach().cpu(), axs=axs[10, :], img_name='DVF', cmap=None)
+        vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[11, :], img_name='Deformed')
+
+        writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
+
+        for key in losses:
+            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+
