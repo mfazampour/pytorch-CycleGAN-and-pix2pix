@@ -22,7 +22,10 @@ from torchio.transforms import (
     ZNormalization,
     Lambda
 )
-import napari
+try:
+    import napari
+except:
+    print("failed to import napari")
 
 
 def load_image_file(path: str) -> np.ndarray:
@@ -98,7 +101,7 @@ class VolumeDataset(BaseDataset):
         # clip_intensity = Lambda(VolumeDataset.clip_image, types_to_apply=[torchio.INTENSITY])
         # transforms.append(clip_intensity)
 
-        rescale = RescaleIntensity((-1, 1), percentiles=(0.5, 99.5))
+        rescale = RescaleIntensity((-1, 1))
         # normalize with mu = 0 and sigma = 1/3 to have data in -1...1 almost
         # ZNormalization()
 
@@ -140,9 +143,12 @@ class VolumeDataset(BaseDataset):
         transformed_ = self.transform(subject)
 
         if self.opt.visualize_volume:
-            with napari.gui_qt():
-                napari.view_image(np.stack([transformed_['mr'].data.squeeze().numpy(),
-                                            transformed_['trus'].data.squeeze().numpy()]))
+            try:
+                with napari.gui_qt():
+                    napari.view_image(np.stack([transformed_['mr'].data.squeeze().numpy(),
+                                                transformed_['trus'].data.squeeze().numpy()]))
+            except:
+                pass
 
         dict_ = {
             'A': transformed_['mr'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],

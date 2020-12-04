@@ -3,7 +3,10 @@ from typing import List
 import torch
 import torch.nn.functional as F
 import numpy as np
-import napari
+try:
+    import napari
+except:
+    print("failed to load napari")
 
 from util import se3
 
@@ -83,5 +86,9 @@ def show_volumes(img_list: List[torch.Tensor]):
     img_list_np = []
     for t in img_list:
         img_list_np.append(t[0, ...].cpu().squeeze().numpy())
-    with napari.gui_qt():
-        napari.view_image(np.stack(img_list_np))
+    try:
+        with napari.gui_qt():
+            napari.view_image(np.stack(img_list_np))
+    except:
+        print("failed to load napari")
+

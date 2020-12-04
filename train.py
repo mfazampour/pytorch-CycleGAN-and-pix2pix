@@ -25,8 +25,28 @@ from models import create_model
 from util.visualizer import Visualizer
 from torch.utils.tensorboard import SummaryWriter
 
+try:
+    from polyaxon_helper import (
+        get_outputs_path,
+        get_data_paths,
+    )
+    on_cluster = True
+except:
+    on_cluster = False
+
 if __name__ == '__main__':
     opt = TrainOptions().parse()   # get training options
+    try:
+        base_path = get_data_paths()
+        print("You are running on the cluster :)")
+        opt.dataroot = base_path['data1'] + opt.dataroot
+        print(opt.dataroot)
+        opt.tensorboard_path = get_outputs_path()
+        opt.checkpoints_dir = get_outputs_path()
+        TrainOptions().print_options(opt)
+    except:
+        print("You are Running on the local Machine")
+
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
@@ -35,6 +55,7 @@ if __name__ == '__main__':
     model.setup(opt)               # regular setup: load and print networks; create schedulers
     visualizer = Visualizer(opt)   # create a visualizer that display/save images and plots
     total_iters = 0                # the total number of training iterations
+
 
     writer = SummaryWriter(opt.tensorboard_path)
 
@@ -62,7 +83,7 @@ if __name__ == '__main__':
                 log_tensorboard = getattr(model, "log_tensorboard", None)
                 if callable(log_tensorboard):
                     losses = model.get_current_losses()
-                    log_tensorboard(writer, losses, epoch_iter)
+                    log_tensorboard(writer, losses, total_iters)
 
             if total_iters % opt.print_freq == 0:    # print training losses and save logging information to the disk
                 losses = model.get_current_losses()

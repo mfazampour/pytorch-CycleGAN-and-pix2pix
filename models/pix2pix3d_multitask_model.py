@@ -1,23 +1,18 @@
-import numpy as np
-import torch
-import os
 import argparse
+import os
 from collections import OrderedDict
-import GPUtil
 from typing import Tuple
 
-import util.util as util
-from util.image_pool import ImagePool
-from .base_model import BaseModel
-from .pix2pix3d_model import Pix2Pix3dModel
-from . import networks3d
-from . import networks
-from util import affine_transform
+import torch
 from torch.utils.tensorboard import SummaryWriter
+
+from util import affine_transform
+from . import networks
+from . import networks3d
+from .pix2pix3d_model import Pix2Pix3dModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
-
 
 class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
@@ -424,7 +419,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch)
-        if epoch > self.opt.L1_epochs:
+        if epoch >= self.opt.L1_epochs:
             self.first_phase_coeff = 0
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):

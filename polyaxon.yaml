@@ -1,0 +1,87 @@
+---
+version: 1
+
+kind: experiment
+
+framework: pytorch
+
+tags: [Mutltitask, HPTuning]
+
+
+
+build:
+  image: pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime
+  build_steps:
+    - apt update
+    - apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git
+    - pip install -r requirements.txt
+
+environment:
+  resources:
+    cpu:
+      requests: 3
+      limits: 4
+    memory:
+      requests: 20000
+      limits: 32000
+    gpu:
+      requests: 1
+      limits: 1
+
+params:
+  n_epochs: 100
+  dataroot: "/Prostate_Reg_KM/anonymized"
+  name: "multitask"
+  model: "pix2pix3d_multitask"
+  netG: "unet_128"
+  dataset_mode: "volume"
+  input_nc: 1
+  output_nc: 1
+  lr_policy: "step"
+  display_freq: 5
+  lr_decay_iters: 1
+  batch_size: 1
+  display_server: http://0.0.0.0
+  lambda_L1: 10
+  lambda_Reg: 10
+  print_freq: 5
+  lr: 0.00002
+  load_mask: true
+  gpu_ids: 0
+  num_threads: 2
+  netReg: "NormalNet"
+  inshape: "128 128 128"
+  L1_epochs: 10
+  lambda_Seg: 10
+  display_ncols: 3
+
+run:
+    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --model={{ model }} \
+                                    --dataroot={{ dataroot }} \
+                                    --name={{ name }} \
+                                    --model={{ model }} \
+                                    --input_nc={{ input_nc }} \
+                                    --output_nc={{ output_nc }} \
+                                    --netG={{ netG }} \
+                                    --dataset_mode={{ dataset_mode }} \
+                                    --lr_policy={{ lr_policy }} \
+                                    --display_freq={{ display_freq }} \
+                                    --lr_decay_iters={{ lr_decay_iters }} \
+                                    --batch_size={{ batch_size }} \
+                                    --display_server={{ display_server }} \
+                                    --lambda_L1={{ lambda_L1 }} \
+                                    --lambda_Reg={{ lambda_Reg }} \
+                                    --print_freq={{ print_freq }} \
+                                    --lr={{ lr }} \
+                                    --load_mask={{ load_mask }} \
+                                    --gpu_ids={{ gpu_ids }} \
+                                    --num_threads={{ num_threads }} \
+                                    --netReg={{ netReg }} \
+                                    --inshape {{ inshape }} \
+                                    --L1_epochs={{ L1_epochs }} \
+                                    --lambda-Seg={{ lambda_Seg }} \
+                                    --display_ncols={{ display_ncols }} \
+                                    --display_id -1
+

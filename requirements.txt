@@ -5,13 +5,22 @@ visdom>=0.1.8.8
 
 numpy
 Pillow
-SimpleITK
 torchio
+opencv-python-headless
+SimpleITK==1.2.4
 napari
 scikit-image
 scipy
 requests
-opencv-python
 matplotlib
 geomstats
-voxelmorph
+TensorBoard
+torchgeometry
+polyaxon_helper
+pytorch3d
+monai
+-e git+https://github.com/adalca/pystrum@99748c68e19b2bf53059080998629edf409d3005#egg=pystrum
+scikit-image
+h5py
+scipy
+nibabel
