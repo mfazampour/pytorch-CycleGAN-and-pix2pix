@@ -62,8 +62,8 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
             parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
             parser.add_argument('--lr-Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
-            parser.add_argument('--lambda-Seg', type=float, default=0.5, help='weight for the segmentation loss')
-            parser.add_argument('--lambda-Def', type=float, default=1.0, help='weight for the segmentation loss')
+            parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
             parser.add_argument('--lr-Def', type=float, default=0.00001, help='learning rate for the reg. network opt.')
 
             # loss hyperparameters

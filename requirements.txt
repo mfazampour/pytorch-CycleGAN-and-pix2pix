@@ -19,7 +19,7 @@ torchgeometry
 polyaxon_helper
 pytorch3d
 monai
--e git+https://github.com/adalca/pystrum@99748c68e19b2bf53059080998629edf409d3005#egg=pystrum
+git+https://github.com/adalca/pystrum@99748c68e19b2bf53059080998629edf409d3005#egg=pystrum
 scikit-image
 h5py
 scipy

@@ -3,6 +3,9 @@ import torch
 import os
 import argparse
 from collections import OrderedDict
+
+from torch.utils.tensorboard import SummaryWriter
+
 import util.util as util
 from util.image_pool import ImagePool
 from .base_model import BaseModel
@@ -11,6 +14,8 @@ from . import networks3d
 
 from . import networks
 
+os.environ['VXM_BACKEND'] = 'pytorch'
+from voxelmorph import voxelmorph as vxm  # just need it for tensorboard visualization helper functions
 
 class Pix2Pix3dSegModel(Pix2Pix3dModel):
 
@@ -35,9 +40,9 @@ class Pix2Pix3dSegModel(Pix2Pix3dModel):
 
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
-            parser.add_argument('--lambda-L1', type=float, default=100.0, help='weight for L1 loss')
+            parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no-lsgan', type=bool, default=False)
-            parser.add_argument('--lambda-Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
             # parser.add_argument('--visualize_volume', type=bool, default=False)
 
         return parser
@@ -178,3 +183,19 @@ class Pix2Pix3dSegModel(Pix2Pix3dModel):
         self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
         self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
         self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
+
+
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+        axs, fig = vxm.torch.utils.init_figure(3, 6)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[3, :], img_name='Mask A')
+        vxm.torch.utils.fill_subplots(self.seg_A.detach().cpu(), axs=axs[4, :], img_name='Seg Fake')
+        vxm.torch.utils.fill_subplots(self.seg_B.cpu(), axs=axs[5, :], img_name='Seg B')
+
+        writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
+
+        for key in losses:
+            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)

@@ -31,28 +31,24 @@ environment:
 params:
   n_epochs: 100
   dataroot: "/Prostate_Reg_KM/anonymized"
-  name: "multitask"
-  model: "pix2pix3d_multitask"
+  name: "pix2pix3d_seg"
+  model: "pix2pix3d_seg"
   netG: "unet_128"
   dataset_mode: "volume"
   input_nc: 1
   output_nc: 1
-  lr_policy: "step"
-  display_freq: 5
+  lr_policy: "linear"
+  display_freq: 20
   lr_decay_iters: 1
-  batch_size: 1
+  batch_size: 3
   display_server: http://0.0.0.0
-  lambda_L1: 10
-  lambda_Reg: 10
-  print_freq: 5
+  lambda_L1: 0.1
+  print_freq: 10
   lr: 0.00002
   load_mask: true
   gpu_ids: 0
-  num_threads: 2
-  netReg: "NormalNet"
-  inshape: "128 128 128"
-  L1_epochs: 10
-  lambda_Seg: 10
+  num_threads: 3
+  lambda_Seg: 100
   display_ncols: 3
 
 run:
@@ -72,15 +68,11 @@ run:
                                     --batch_size={{ batch_size }} \
                                     --display_server={{ display_server }} \
                                     --lambda_L1={{ lambda_L1 }} \
-                                    --lambda_Reg={{ lambda_Reg }} \
                                     --print_freq={{ print_freq }} \
                                     --lr={{ lr }} \
                                     --load_mask={{ load_mask }} \
                                     --gpu_ids={{ gpu_ids }} \
                                     --num_threads={{ num_threads }} \
-                                    --netReg={{ netReg }} \
-                                    --inshape {{ inshape }} \
-                                    --L1_epochs={{ L1_epochs }} \
                                     --lambda_Seg={{ lambda_Seg }} \
                                     --display_ncols={{ display_ncols }} \
                                     --display_id -1
