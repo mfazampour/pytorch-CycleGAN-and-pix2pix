@@ -18,7 +18,9 @@ See options/base_options.py and options/train_options.py for more training optio
 See training and test tips at: xhttps://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/tips.md
 See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/qa.md
 """
+import os
 import time
+
 from options.train_options import TrainOptions
 from data import create_dataset
 from models import create_model
@@ -35,7 +37,8 @@ except:
     on_cluster = False
 
 if __name__ == '__main__':
-    opt = TrainOptions().parse()   # get training options
+    parser = TrainOptions()
+    opt = parser.parse()   # get training options
     try:
         base_path = get_data_paths()
         print("You are running on the cluster :)")
@@ -43,8 +46,11 @@ if __name__ == '__main__':
         print(opt.dataroot)
         opt.tensorboard_path = get_outputs_path()
         opt.checkpoints_dir = get_outputs_path()
-        TrainOptions().print_options(opt)
-    except:
+        if opt.load_init_models is not None:
+            opt.load_init_models = os.path.join(base_path['data1'], opt.load_init_models)
+        parser.print_options(opt)
+    except Exception as e:
+        print(e)
         print("You are Running on the local Machine")
 
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options

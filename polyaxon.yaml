@@ -31,29 +31,31 @@ environment:
 params:
   n_epochs: 100
   dataroot: "/Prostate_Reg_KM/anonymized"
+  load_init_models: "Prostate_Reg_KM/multitask/init_weights"
   name: "multitask"
   model: "pix2pix3d_multitask"
   netG: "unet_128"
   dataset_mode: "volume"
   input_nc: 1
   output_nc: 1
-  lr_policy: "step"
-  display_freq: 5
+  lr_policy: "linear"
+  display_freq: 20
   lr_decay_iters: 1
   batch_size: 1
   display_server: http://0.0.0.0
-  lambda_L1: 10
+  lambda_L1: 1
   lambda_Reg: 10
-  print_freq: 5
+  print_freq: 10
   lr: 0.00002
   load_mask: true
   gpu_ids: 0
-  num_threads: 2
+  num_threads: 3
   netReg: "NormalNet"
   inshape: "128 128 128"
-  L1_epochs: 10
-  lambda_Seg: 10
+  L1_epochs: 1
+  lambda_Seg: 100
   display_ncols: 3
+  epoch: init
 
 run:
     cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -83,5 +85,8 @@ run:
                                     --L1_epochs={{ L1_epochs }} \
                                     --lambda_Seg={{ lambda_Seg }} \
                                     --display_ncols={{ display_ncols }} \
-                                    --display_id -1
+                                    --display_id -1 \
+                                    --load_init_models {{load_init_models}} \
+                                    --epoch {{ epoch }}
+                                    --continue_train
 
