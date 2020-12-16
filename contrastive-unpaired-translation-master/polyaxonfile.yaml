@@ -1,0 +1,65 @@
+---
+version: 1
+
+kind: experiment
+
+framework: pytorch
+
+tags: [examples]
+
+params:
+    n_epochs: 200
+    dataroot: "/Prostate_Reg_KM/anonymized"
+    name: "cut"
+    model: "multichannel"
+    dataset_mode: "volume"
+    input_nc: 1
+    output_nc: 1
+    lr_policy: "step"
+    display_freq: 2
+    lr_decay_iters: 1
+    batch_size: 1
+    display_id: -1
+    netG: "resnet_6blocks"
+    CUT_mode: "CUT"
+
+    
+
+build:
+  image: pytorch/pytorch:1.2-cuda10.0-cudnn7-runtime
+  build_steps:
+  - apt update
+  - apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev
+  - pip install opencv-python
+  - pip install -r requirements.txt
+
+environment:
+  resources:
+    cpu:
+      requests: 3
+      limits: 4
+    memory:
+      requests: 12024
+      limits: 20098
+    gpu:
+      requests: 1
+      limits: 1
+
+
+run:
+        cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --model={{ model }} \
+                                    --dataroot={{ dataroot }} \
+                                    --name={{ name }} \
+                                    --input_nc={{ input_nc }} \
+                                    --output_nc={{ output_nc }} \
+                                    --dataset_mode={{ dataset_mode }} \
+                                    --lr_policy={{ lr_policy }} \
+                                    --display_freq={{ display_freq }} \
+                                    --lr_decay_iters={{ lr_decay_iters }} \
+                                    --batch_size={{ batch_size }} \ 
+                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --display_id={{ display_id }} \ 
+                                    --netG={{ netG }} 
+
