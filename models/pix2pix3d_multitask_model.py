@@ -353,7 +353,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
-        super().compute_visuals()
+       # super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
 
