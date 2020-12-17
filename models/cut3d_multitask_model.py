@@ -496,10 +496,17 @@ class CUT3dMultiTaskModel(CUTModel):
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
         axs, fig = vxm.torch.utils.init_figure(3, 12)
         vxm.torch.utils.set_axs_attribute(axs)
+
+        ##  START Because I removed visuals ##
         reg_A, reg_B = self.get_transformed_images()
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
         self.diff_orig = self.real_B - self.transformed_B
+        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
+        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
+        ##  END Because I removed visuals ##
+
+
         vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')

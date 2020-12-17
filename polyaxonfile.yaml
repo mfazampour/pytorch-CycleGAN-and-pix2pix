@@ -33,9 +33,8 @@ params:
   dataroot: "/Prostate_Reg_KM/anonymized"
   load_init_models: "Prostate_Reg_KM/multitask/init_weights"
   name: "multitask"
-  model: "pix2pix3d_multitask"
-  netG: "unet_128"
-  dataset_mode: "volume"
+  model: "cut3d_multitask"
+  netG: "resnet_cat"
   input_nc: 1
   output_nc: 1
   lr_policy: "linear"
@@ -56,6 +55,12 @@ params:
   lambda_Seg: 100
   display_ncols: 3
   epoch: init
+  dataset_mode: volume
+  CUT_mode: CUT
+  val_fold: validation
+  train_fold: train
+  display_id: -1
+
 
 run:
     cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -87,6 +92,10 @@ run:
                                     --display_ncols={{ display_ncols }} \
                                     --display_id -1 \
                                     --load_init_models {{load_init_models}} \
+                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --display_id={{ display_id }} \ 
+                                    --val_fold={{ val_fold }} \ 
+                                    --dataset_mode={{ dataset_mode }} \ 
                                     --epoch {{ epoch }}
                                     --continue_train
 
