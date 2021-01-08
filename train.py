@@ -6,7 +6,7 @@ from models import create_model
 from util.visualizer import Visualizer
 from torch.utils.tensorboard import SummaryWriter
 
-#
+# 
 if __name__ == '__main__':
     opt = TrainOptions().parse()   # get training options
 
@@ -49,6 +49,7 @@ if __name__ == '__main__':
         dataset.set_epoch(epoch)
         for i, data in enumerate(dataset):  # inner loop within one epoch
 
+
             iter_start_time = time.time()  # timer for computation per iteration
             if total_iters % opt.print_freq == 0:
                 t_data = iter_start_time - iter_data_time
@@ -79,7 +80,7 @@ if __name__ == '__main__':
             if total_iters % opt.print_freq == 0:    # print training losses and save logging information to the disk
                 losses = model.get_current_losses()
                 visualizer.print_current_losses(epoch, epoch_iter, losses, optimize_time, t_data)
-                model.log_tensorboard(writer, total_iters)
+                model.log_tensorboard(writer=writer,losses=losses, global_step=total_iters)
 
             if total_iters % opt.save_latest_freq == 0:   # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
@@ -95,4 +96,4 @@ if __name__ == '__main__':
             model.save_networks(epoch)
 
         print('End of epoch %d / %d \t Time Taken: %d sec' % (epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
-        model.update_learning_rate()                     # update learning rates at the end of every epoch.
+        model.update_learning_rate_3d(epoch=epoch)                     # update learning rates at the end of every epoch.
