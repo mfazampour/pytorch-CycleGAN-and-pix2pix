@@ -54,7 +54,7 @@ def create_dataset(opt, to_validate):
         >>> from data import create_dataset
         >>> dataset = create_dataset(opt)
     """
-    data_loader = CustomDatasetDataLoader(opt,to_validate)
+    data_loader = CustomDatasetDataLoader(opt, to_validate)
     dataset = data_loader.load_data()
     return dataset
 
@@ -62,7 +62,7 @@ def create_dataset(opt, to_validate):
 class CustomDatasetDataLoader():
     """Wrapper class of Dataset class that performs multi-threaded data loading"""
 
-    def __init__(self, opt,to_validate):
+    def __init__(self, opt, to_validate):
         """Initialize this class
 
         Step 1: create a dataset instance given the name [dataset_mode]
@@ -70,7 +70,7 @@ class CustomDatasetDataLoader():
         """
         self.opt = opt
         dataset_class = find_dataset_using_name(opt.dataset_mode)
-        self.dataset = dataset_class(opt,to_validate=to_validate)
+        self.dataset = dataset_class(opt, to_validate=to_validate)
         print("dataset [%s] was created" % type(self.dataset).__name__)
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,

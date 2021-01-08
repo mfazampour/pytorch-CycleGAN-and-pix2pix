@@ -2,6 +2,7 @@ import time
 import os
 
 import torch
+import numpy as np
 
 from options.train_options import TrainOptions
 from data import create_dataset
@@ -32,6 +33,7 @@ if __name__ == '__main__':
         print("You are Running on the local Machine")
 
     dataset = create_dataset(opt, to_validate=False)  # create a dataset given opt.dataset_mode and other options
+    dataset_val = create_dataset(opt, to_validate=True)  # validation dataset
     dataset_size = len(dataset)  # get the number of images in the dataset.
 
     model = create_model(opt)  # create a model given opt.model and other options
@@ -73,9 +75,15 @@ if __name__ == '__main__':
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
             if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
+                idx = np.random.randint(0, len(dataset_val)-1, size=1) # visualize results on the val dataset
+                data = dataset_val[idx]
+                with torch.no_grad():
+                    model.set_input(data)  # unpack data from data loader
+                    model.test()  # run inference
                 save_result = total_iters % opt.update_html_freq == 0
-                model.compute_visuals()
                 visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
+                if hasattr(model, 'log_tensorboard'):
+                    model.log_tensorboard(writer, total_iters)
 
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
@@ -85,7 +93,7 @@ if __name__ == '__main__':
             if total_iters % opt.print_freq == 0:  # print training losses and save logging information to the disk
                 losses = model.get_current_losses()
                 visualizer.print_current_losses(epoch, epoch_iter, losses, optimize_time, t_data)
-                model.log_tensorboard(writer, total_iters)
+
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
