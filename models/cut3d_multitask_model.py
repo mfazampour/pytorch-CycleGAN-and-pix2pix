@@ -493,20 +493,41 @@ class CUT3dMultiTaskModel(CUTModel):
         if epoch >= self.opt.L1_epochs:
             self.first_phase_coeff = 0
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
-        axs, fig = vxm.torch.utils.init_figure(3, 12)
-        vxm.torch.utils.set_axs_attribute(axs)
+    def compute_visuals(self):
+        """Calculate additional output images for visdom and HTML visualization"""
 
-        ##  START Because I removed visuals ##
         reg_A, reg_B = self.get_transformed_images()
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
         self.diff_orig = self.real_B - self.transformed_B
         self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
         self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
-        ##  END Because I removed visuals ##
 
 
+        n_c = self.real_A.shape[2]
+        # average over channel to get the real and fake image
+        self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
+        self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
+        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[3]
+        self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
+        self.fake_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[4]
+        self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
+        self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
+        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
+
+        self.empty_img_1 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_2 = torch.zeros_like(self.real_A_center_axi)
+        self.empty_img_3 = torch.zeros_like(self.real_A_center_axi)
+
+
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+        axs, fig = vxm.torch.utils.init_figure(3, 12)
+        vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
