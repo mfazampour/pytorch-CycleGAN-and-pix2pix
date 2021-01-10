@@ -11,12 +11,12 @@ from torch.utils.tensorboard import SummaryWriter
 from util import affine_transform
 from . import networks
 from . import networks3d
-from .cut_model import CUTModel
+from .cut3d_model import CUT3dModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 #
-class CUT3dMultiTaskModel(CUTModel):
+class CUT3DMultiTask3dModel(CUT3dModel):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
@@ -82,10 +82,10 @@ class CUT3dMultiTaskModel(CUTModel):
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
-            parser.add_argument('--lr-Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lr_Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
-            parser.add_argument('--lr-Def', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lr_Def', type=float, default=0.00001, help='learning rate for the reg. network opt.')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -235,7 +235,7 @@ class CUT3dMultiTaskModel(CUTModel):
         self.visual_names += ['dvf_center_sag', 'dvf_center_cor', 'dvf_center_axi']
         self.visual_names += ['deformed_B_center_sag', 'deformed_B_center_cor', 'deformed_B_center_axi']
         if self.opt.nce_idt and self.isTrain:
-            self.visual_names += ['idt_B']
+            self.visual_names += ['idt_B_center_sag', 'idt_B_center_cor', 'idt_B_center_axi']
 
 
     # def name(self):
@@ -427,10 +427,11 @@ class CUT3dMultiTaskModel(CUTModel):
         super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
-
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
         self.diff_orig = self.real_B - self.transformed_B
+        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
+        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
 
         n_c = self.real_A.shape[2]
 
@@ -457,9 +458,6 @@ class CUT3dMultiTaskModel(CUTModel):
         self.diff_orig_center_axi = self.diff_orig[..., int(n_c / 2)]
         self.deformed_center_axi = self.transformed_B[..., int(n_c / 2)]
 
-        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
-        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
-
         n_c = self.real_A.shape[2]
         # average over channel to get the real and fake image
         self.mask_A_center_sag = self.mask_A[:, :, int(n_c / 2), ...]
@@ -481,7 +479,7 @@ class CUT3dMultiTaskModel(CUTModel):
         self.deformed_B_center_sag = self.deformed_B[:, :, n_c, ...]
 
         n_c = int(self.real_A.shape[3] / 2)
-        self.dvf_center_cor = self.dvf[:, :, ..., n_c, :]
+        self.dvf_center_cor = self.dvf[..., n_c, :]
         self.deformed_B_center_cor = self.deformed_B[..., n_c, :]
 
         n_c = int(self.real_A.shape[4] / 2)
@@ -492,38 +490,6 @@ class CUT3dMultiTaskModel(CUTModel):
         super().update_learning_rate(epoch)
         if epoch >= self.opt.L1_epochs:
             self.first_phase_coeff = 0
-
-    def compute_visuals(self):
-        """Calculate additional output images for visdom and HTML visualization"""
-
-        reg_A, reg_B = self.get_transformed_images()
-        self.diff_A = reg_A - self.transformed_B
-        self.diff_B = reg_B - self.transformed_B
-        self.diff_orig = self.real_B - self.transformed_B
-        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
-        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
-
-
-        n_c = self.real_A.shape[2]
-        # average over channel to get the real and fake image
-        self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
-        self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
-        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
-
-        n_c = self.real_A.shape[3]
-        self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
-        self.fake_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
-        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
-
-        n_c = self.real_A.shape[4]
-        self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
-        self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
-        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
-
-        self.empty_img_1 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_2 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_3 = torch.zeros_like(self.real_A_center_axi)
-
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
         axs, fig = vxm.torch.utils.init_figure(3, 12)

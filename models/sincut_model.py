@@ -1,8 +1,8 @@
 import torch
-from .cut_model import CUTModel
+from .cut3d_model import CUT3dModel
 #
 
-class SinCUTModel(CUTModel):
+class SinCUT3dModel(CUT3dModel):
     """ This class implements the single image translation model (Fig 9) of
     Contrastive Learning for Unpaired Image-to-Image Translation
     Taesung Park, Alexei A. Efros, Richard Zhang, Jun-Yan Zhu
@@ -11,7 +11,7 @@ class SinCUTModel(CUTModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
-        parser = CUTModel.modify_commandline_options(parser, is_train)
+        parser = CUT3dModel.modify_commandline_options(parser, is_train)
         parser.add_argument('--lambda_R1', type=float, default=1.0,
                             help='weight for the R1 gradient penalty')
         parser.add_argument('--lambda_identity', type=float, default=1.0,
