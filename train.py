@@ -10,7 +10,6 @@ from models import create_model
 from util.visualizer import Visualizer
 from torch.utils.tensorboard import SummaryWriter
 
-#
 if __name__ == '__main__':
     parser = TrainOptions()
     opt = parser.parse()  # get training options
@@ -24,7 +23,6 @@ if __name__ == '__main__':
         base_path = get_data_paths()
         print("You are running on the cluster :)")
         opt.dataroot = base_path['data1'] + opt.dataroot
-        opt.tensorboard_path = get_outputs_path()
         opt.checkpoints_dir = get_outputs_path()
         opt.display_id = -1  # no visdom available on the cluster
         parser.print_options(opt)
@@ -46,6 +44,8 @@ if __name__ == '__main__':
     optimize_time = 0.1
 
     times = []
+    opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
+    os.makedirs(opt.tensorboard_path, exist_ok=True)
     writer = SummaryWriter(opt.tensorboard_path)
 
     for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
@@ -74,17 +74,6 @@ if __name__ == '__main__':
             model.set_input(data)  # unpack data from dataset and apply preprocessing
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
-            if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
-                idx = np.random.randint(0, len(dataset_val)-1, size=1) # visualize results on the val dataset
-                data = dataset_val[idx]
-                with torch.no_grad():
-                    model.set_input(data)  # unpack data from data loader
-                    model.test()  # run inference
-                save_result = total_iters % opt.update_html_freq == 0
-                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
-                if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard(writer, total_iters)
-
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
             optimize_time = (time.time() - optimize_start_time) / batch_size * 0.005 + 0.995 * optimize_time
@@ -94,6 +83,16 @@ if __name__ == '__main__':
                 losses = model.get_current_losses()
                 visualizer.print_current_losses(epoch, epoch_iter, losses, optimize_time, t_data)
 
+            if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
+                losses = model.get_current_losses()  # read losses before setting to no_grad for validation
+                data = next(iter(dataset_val))
+                with torch.no_grad():
+                    model.set_input(data)  # unpack data from data loader
+                    model.test()  # run inference
+                save_result = total_iters % opt.update_html_freq == 0
+                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
+                if hasattr(model, 'log_tensorboard'):
+                    model.log_tensorboard(writer, losses, total_iters)
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
