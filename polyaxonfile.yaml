@@ -1,0 +1,77 @@
+---
+version: 1
+
+kind: experiment
+
+framework: pytorch
+
+tags: [Mutltitask, HPTuning]
+
+
+
+build:
+  image: pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime
+  build_steps:
+    - apt update
+    - apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git
+    - pip install -r requirements.txt
+
+environment:
+  resources:
+    cpu:
+      requests: 3
+      limits: 4
+    memory:
+      requests: 20000
+      limits: 32000
+    gpu:
+      requests: 1
+      limits: 1
+
+params:
+  dataroot: "/Prostate_Reg_KM/anonymized"
+  dataset_mode: volume
+  output_nc: 1
+  input_nc: 1
+  lr_policy: step
+  display_freq: 2
+  lr_decay_iters: 1
+  batch_size: 1
+  epoch_count: 0
+  n_epochs: 100
+  netG: resnet_cat
+  CUT_mode: CUT
+  model: cut3d_multitask
+  val_fold: /validation/
+  train_fold: /train/
+  load_mask: True
+  display_id: -1
+  load_init_models: /data/Prostate_Reg_KM/multitask/init_weights_cut/
+  epochs_before_reg: 1
+  epoch: init
+
+
+
+run:
+    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --dataroot={{ dataroot }} \
+                                    --dataset_mode={{ dataset_mode }} \
+                                    --output_nc={{ output_nc }} \
+                                    --input_nc={{ input_nc }} \
+                                    --lr_policy={{ lr_policy }} \
+                                    --display_freq={{ display_freq }} \
+                                    --lr_decay_iters {{ lr_decay_iters }} \
+                                    --epoch_count={{ epoch_count }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --netG={{ netG }} \ 
+                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --model={{ model }} \ 
+                                    --val_fold={{ val_fold }} \ 
+                                    --train_fold={{ train_fold }} \ 
+                                    --load_mask={{ load_mask }} \ 
+                                    --load_init_models={{ load_init_models }} \
+                                    --epochs_before_reg={{ epochs_before_reg }} \
+                                    --epoch={{ epoch }} \
+                                    --display_id={{ display_id }} \
+                                    --continue_train
+
