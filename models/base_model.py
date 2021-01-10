@@ -135,8 +135,9 @@ class BaseModel(ABC):
         """ Return image paths that are used to load current data"""
         return self.image_paths
 
-    def update_learning_rate(self):
+    def update_learning_rate(self, epoch=0):
         """Update learning rates for all the networks; called at the end of every epoch"""
+        old_lr = self.optimizers[0].param_groups[0]['lr']
         for scheduler in self.schedulers:
             if self.opt.lr_policy == 'plateau':
                 scheduler.step(self.metric)
@@ -144,7 +145,7 @@ class BaseModel(ABC):
                 scheduler.step()
 
         lr = self.optimizers[0].param_groups[0]['lr']
-        print('learning rate = %.7f' % lr)
+        print('learning rate %.7f -> %.7f' % (old_lr, lr))
 
     def get_current_visuals(self):
         """Return visualization images. train.py will display these images with visdom, and save the images to a HTML"""
@@ -222,9 +223,10 @@ class BaseModel(ABC):
             if isinstance(name, str):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 if self.opt.isTrain and self.opt.pretrained_name is not None:
-                    load_dir = os.path.join(self.opt.checkpoints_dir, self.opt.pretrained_name)
+                        self.join = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
+                        load_dir = self.join
                 else:
-                    load_dir = self.save_dir
+                    load_dir = self.opt.load_init_models
 
                 load_path = os.path.join(load_dir, load_filename)
                 net = getattr(self, 'net' + name)
@@ -240,7 +242,17 @@ class BaseModel(ABC):
                 # patch InstanceNorm checkpoints prior to 0.4
                 # for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
                 #    self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
-                net.load_state_dict(state_dict)
+                print(f"name {name}")
+                model = self.get_model(name)
+                pre_params = state_dict
+                new_params = model.state_dict()
+
+                for key in new_params:
+                    if key in pre_params:
+                        if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
+                            new_params[key] = pre_params[key]
+
+                model.load_state_dict(new_params)
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture

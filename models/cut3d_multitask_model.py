@@ -9,6 +9,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from util import affine_transform
+from util import distance_landmarks
 from . import networks
 from . import networks3d
 from .cut3d_model import CUT3dModel
@@ -37,8 +38,8 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
-        parser.add_argument('--L1_epochs', type=int, default=15,
-                            help='number of epochs to train the network with the L1 loss before reg loss is used')
+        parser.add_argument('--epochs_before_reg', type=int, default=15,
+                            help='number of epochs to train the network before reg loss is used')
         parser.add_argument('--cudnn-nondet', action='store_true',
                             help='disable cudnn determinism - might slow down training')
         # network architecture parameters
@@ -156,8 +157,23 @@ class CUT3DMultiTask3dModel(CUT3dModel):
             self.criterionSeg = networks.DiceLoss()
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
+            self.distance_landmarks_b = 0
 
         self.first_phase_coeff = 1
+
+    def get_model(self, name):
+        if name == "RigidReg":
+            return self.netRigidReg
+        if name == "DefReg":
+            return self.netDefReg
+        if name == "Seg":
+            return self.netSeg
+        if name == "G":
+            return self.netG
+        if name == 'F':
+            return self.netF
+        if name =='D':
+            return self.netD
 
     def set_networks(self, opt):
         # specify the models you want to save to the disk. The training/test scripts will call
@@ -205,6 +221,9 @@ class CUT3DMultiTask3dModel(CUT3dModel):
                                       opt)
         self.netF = networks.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
                                       opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+
+        self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+
 
     def set_visdom_names(self):
         # specify the training losses you want to print out. The training/test scripts will call
@@ -256,13 +275,15 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
-        self.landmarks_A = input['A_landmark'].to(self.device)
-        self.landmarks_B = input['B_landmark'].to(self.device)
+        self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
+        self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
                                                                        self.real_B.shape[-3:],
                                                                        self.real_B.dtype,
                                                                        device=self.real_B.device)
         self.transformed_B = affine_transform.transform_image(self.real_B, affine, self.real_B.device)
+        self.transformed_LM_B = affine_transform.transform_image(self.landmarks_B, affine, self.landmarks_B.device)
+
         if self.opt.show_volumes:
             affine_transform.show_volumes([self.real_B, self.transformed_B])
 
@@ -427,6 +448,12 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
+        self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
+                                                 affine_transform.tensor_vector_to_matrix(self.reg_B_params.detach()),
+                                                 device=self.transformed_LM_B.device)
+
+        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B, self.transformed_LM_B.device)
+
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
         self.diff_orig = self.real_B - self.transformed_B
@@ -486,9 +513,9 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.dvf_center_axi = self.dvf[:, :, ..., n_c]
         self.deformed_B_center_axi = self.deformed_B[..., n_c]
 
-    def update_learning_rate(self, epoch=0):
-        super().update_learning_rate(epoch)
-        if epoch >= self.opt.L1_epochs:
+    def update_learning_rate_3d(self, epoch=0):
+        super().update_learning_rate(epoch=epoch)
+        if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
@@ -508,6 +535,8 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[11, :], img_name='Deformed')
 
         writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
+
+        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
 
         for key in losses:
             writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
