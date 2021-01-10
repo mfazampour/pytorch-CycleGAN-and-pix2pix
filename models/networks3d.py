@@ -403,8 +403,8 @@ class UnetSkipConnectionBlock3d(nn.Module):
             model = down + [submodule] + up
         elif innermost:
             upconv = nn.ConvTranspose3d(inner_nc, outer_nc,
-                                        kernel_size=4, stride=2,
-                                        padding=1, bias=use_bias)
+                                        kernel_size=4, stride=1,
+                                        padding=0, bias=use_bias)
             down = [downrelu, downconv]
             up = [uprelu, upconv, upnorm]
             model = down + up
@@ -698,7 +698,7 @@ class NormalNet(nn.Module):
         sequence += [nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]
 
         sequence += [nn.Flatten(),
-                     nn.Linear(343, num_classes, bias=False)]
+                     nn.Linear(216, num_classes, bias=False)]
 
         self.model = nn.Sequential(*sequence)
 

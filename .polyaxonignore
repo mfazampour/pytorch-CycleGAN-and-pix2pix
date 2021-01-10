@@ -58,3 +58,4 @@ voxelmorph/data
 voxelmorph/.github
 voxelmorph/.git
 *.npz
+*.gif

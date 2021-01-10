@@ -15,39 +15,6 @@ import torch.utils.data
 from data.base_dataset import BaseDataset
 
 
-class CustomDatasetDataLoader:
-    """Wrapper class of Dataset class that performs multi-threaded data loading"""
-
-    def __init__(self, opt):
-        """Initialize this class
-
-        Step 1: create a dataset instance given the name [dataset_mode]
-        Step 2: create a multi-threaded data loader.
-        """
-        self.opt = opt
-        dataset_class = find_dataset_using_name(opt.dataset_mode)
-        self.dataset = dataset_class(opt)
-        print("dataset [%s] was created" % type(self.dataset).__name__)
-        self.dataloader = torch.utils.data.DataLoader(
-            self.dataset,
-            batch_size=opt.batch_size,
-            shuffle=not opt.serial_batches,
-            num_workers=int(opt.num_threads))
-
-    def load_data(self):
-        return self
-
-    def __len__(self):
-        """Return the number of data in the dataset"""
-        return min(len(self.dataset), self.opt.max_dataset_size)
-
-    def __iter__(self):
-        """Return a batch of data"""
-        for i, data in enumerate(self.dataloader):
-            if i * self.opt.batch_size >= self.opt.max_dataset_size:
-                break
-            yield data
-
 def find_dataset_using_name(dataset_name):
     """Import the module "data/[dataset_name]_dataset.py".
 
@@ -77,7 +44,7 @@ def get_option_setter(dataset_name):
     return dataset_class.modify_commandline_options
 
 
-def create_dataset(opt) -> CustomDatasetDataLoader:
+def create_dataset(opt, to_validate):
     """Create a dataset given the option.
 
     This function wraps the class CustomDatasetDataLoader.
@@ -87,8 +54,45 @@ def create_dataset(opt) -> CustomDatasetDataLoader:
         >>> from data import create_dataset
         >>> dataset = create_dataset(opt)
     """
-    data_loader = CustomDatasetDataLoader(opt)
+    data_loader = CustomDatasetDataLoader(opt, to_validate)
     dataset = data_loader.load_data()
     return dataset
 
 
+class CustomDatasetDataLoader():
+    """Wrapper class of Dataset class that performs multi-threaded data loading"""
+
+    def __init__(self, opt, to_validate):
+        """Initialize this class
+
+        Step 1: create a dataset instance given the name [dataset_mode]
+        Step 2: create a multi-threaded data loader.
+        """
+        self.opt = opt
+        dataset_class = find_dataset_using_name(opt.dataset_mode)
+        self.dataset = dataset_class(opt, to_validate=to_validate)
+        print("dataset [%s] was created" % type(self.dataset).__name__)
+        self.dataloader = torch.utils.data.DataLoader(
+            self.dataset,
+            batch_size=opt.batch_size,
+            shuffle=not opt.serial_batches,
+            num_workers=int(opt.num_threads),
+            drop_last=True if opt.isTrain else False,
+        )
+
+    def set_epoch(self, epoch):
+        self.dataset.current_epoch = epoch
+
+    def load_data(self):
+        return self
+
+    def __len__(self):
+        """Return the number of data in the dataset"""
+        return min(len(self.dataset), self.opt.max_dataset_size)
+
+    def __iter__(self):
+        """Return a batch of data"""
+        for i, data in enumerate(self.dataloader):
+            if i * self.opt.batch_size >= self.opt.max_dataset_size:
+                break
+            yield data

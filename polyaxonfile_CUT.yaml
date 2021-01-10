@@ -5,9 +5,7 @@ kind: experiment
 
 framework: pytorch
 
-tags: [Mutltitask, HPTuning]
-
-
+#tags: [Init]
 
 build:
   image: pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime
@@ -27,35 +25,31 @@ environment:
     gpu:
       requests: 1
       limits: 1
+  node_selector:
+    nvidiaDriver: "450"
 
 params:
   n_epochs: 100
   dataroot: "/Prostate_Reg_KM/anonymized"
-  load_init_models: "Prostate_Reg_KM/multitask/init_weights"
-  name: "multitask"
-  model: "pix2pix3d_multitask"
-  netG: "unet_128"
-  dataset_mode: "volume"
+  name: "cut3d"
+  model: "cut3d"
+  netG: "resnet_cat"
   input_nc: 1
   output_nc: 1
   lr_policy: "linear"
-  display_freq: 20
+  display_freq: 50
   lr_decay_iters: 1
   batch_size: 1
-  display_server: http://0.0.0.0
-  lambda_L1: 1
-  lambda_Reg: 10
   print_freq: 10
   lr: 0.00002
-  load_mask: true
   gpu_ids: 0
   num_threads: 3
-  netReg: "NormalNet"
-  inshape: "128 128 128"
-  L1_epochs: 1
-  lambda_Seg: 100
-  display_ncols: 3
-  epoch: init
+  epoch: 0
+  CUT_mode: CUT
+  val_fold: validation
+  train_fold: train
+  display_id: -1
+
 
 run:
     cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -67,26 +61,15 @@ run:
                                     --input_nc={{ input_nc }} \
                                     --output_nc={{ output_nc }} \
                                     --netG={{ netG }} \
-                                    --dataset_mode={{ dataset_mode }} \
                                     --lr_policy={{ lr_policy }} \
                                     --display_freq={{ display_freq }} \
                                     --lr_decay_iters={{ lr_decay_iters }} \
                                     --batch_size={{ batch_size }} \
-                                    --display_server={{ display_server }} \
-                                    --lambda_L1={{ lambda_L1 }} \
-                                    --lambda_Reg={{ lambda_Reg }} \
                                     --print_freq={{ print_freq }} \
                                     --lr={{ lr }} \
-                                    --load_mask={{ load_mask }} \
                                     --gpu_ids={{ gpu_ids }} \
                                     --num_threads={{ num_threads }} \
-                                    --netReg={{ netReg }} \
-                                    --inshape {{ inshape }} \
-                                    --L1_epochs={{ L1_epochs }} \
-                                    --lambda_Seg={{ lambda_Seg }} \
-                                    --display_ncols={{ display_ncols }} \
-                                    --display_id -1 \
-                                    --load_init_models {{load_init_models}} \
-                                    --epoch {{ epoch }}
-                                    --continue_train
+                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --display_id={{ display_id }} \ 
+                                    --val_fold={{ val_fold }}
 
