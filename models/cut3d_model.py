@@ -261,15 +261,6 @@ class CUT3dModel(BaseModel):
         return total_nce_loss / n_layers
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int):
-
-        writer.add_scalar("LossD/fake", self.loss_D_fake.detach(), global_step=global_step)
-        writer.add_scalar("LossD/real", self.loss_D_real.detach(), global_step=global_step)
-
-        writer.add_scalar("LossG/G_GAN", self.loss_G_GAN.detach(), global_step=global_step)
-        writer.add_scalar("LossG/G", self.loss_G.detach(), global_step=global_step)
-        writer.add_scalar("LossNCE/NCE", self.loss_NCE.detach(), global_step=global_step)
-        #     writer.add_scalar("Loss/max_output", self.max_output.detach(), global_step=total_iter)
-        # torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0, 0, 0))
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
@@ -282,6 +273,9 @@ class CUT3dModel(BaseModel):
                                          global_step=global_step)
         img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Fake B", max_out=85,
                                          image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
+                                         global_step=global_step)
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="IDT B", max_out=85,
+                                         image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
                                          global_step=global_step)
 
         axs, fig = vxm.torch.utils.init_figure(3, 4)

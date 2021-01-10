@@ -16,7 +16,8 @@ from .cut3d_model import CUT3dModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
-#
+
+
 class CUT3DMultiTask3dModel(CUT3dModel):
 
     @staticmethod
@@ -513,7 +514,7 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.dvf_center_axi = self.dvf[:, :, ..., n_c]
         self.deformed_B_center_axi = self.deformed_B[..., n_c]
 
-    def update_learning_rate_3d(self, epoch=0):
+    def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
         if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
