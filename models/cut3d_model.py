@@ -1,14 +1,20 @@
+from collections import OrderedDict
+import os
+
 import numpy as np
 import torch
 from .base_model import BaseModel
 from . import networks
 from .patchnce import PatchNCELoss
 import util.util as util
-import monai
+from monai.visualize import img2tensorboard
 from torch.utils.tensorboard import SummaryWriter
 
+os.environ['VXM_BACKEND'] = 'pytorch'
+from voxelmorph import voxelmorph as vxm
+
 #
-class CUTModel(BaseModel):
+class CUT3dModel(BaseModel):
     """ This class implements CUT and FastCUT model, described in the paper
     Contrastive Learning for Unpaired Image-to-Image Translation
     Taesung Park, Alexei A. Efros, Richard Zhang, Jun-Yan Zhu
@@ -17,6 +23,7 @@ class CUTModel(BaseModel):
     The code borrows heavily from the PyTorch implementation of CycleGAN
     https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix
     """
+
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
         """  Configures options specific for CUT model
@@ -25,12 +32,14 @@ class CUTModel(BaseModel):
 
         parser.add_argument('--lambda_GAN', type=float, default=1.0, help='weight for GAN loss：GAN(G(X))')
         parser.add_argument('--lambda_NCE', type=float, default=1.0, help='weight for NCE loss: NCE(G(X), X)')
-        parser.add_argument('--nce_idt', type=util.str2bool, nargs='?', const=True, default=False, help='use NCE loss for identity mapping: NCE(G(Y), Y))')
+        parser.add_argument('--nce_idt', type=util.str2bool, nargs='?', const=True, default=False,
+                            help='use NCE loss for identity mapping: NCE(G(Y), Y))')
         parser.add_argument('--nce_layers', type=str, default='0,4,8,12,16', help='compute NCE loss on which layers')
         parser.add_argument('--nce_includes_all_negatives_from_minibatch',
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help='(used for single image translation) If True, include the negatives from the other samples of the minibatch when computing the contrastive loss. Please see models/patchnce.py for more details.')
-        parser.add_argument('--netF', type=str, default='mlp_sample', choices=['sample', 'reshape', 'mlp_sample'], help='how to downsample the feature map')
+        parser.add_argument('--netF', type=str, default='mlp_sample', choices=['sample', 'reshape', 'mlp_sample'],
+                            help='how to downsample the feature map')
         parser.add_argument('--netF_nc', type=int, default=256)
         parser.add_argument('--nce_T', type=float, default=0.07, help='temperature for NCE loss')
         parser.add_argument('--num_patches', type=int, default=256, help='number of patches per layer')
@@ -38,7 +47,7 @@ class CUTModel(BaseModel):
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
 
-        parser.set_defaults(pool_size=0)  # no image pooling
+        parser.set_defaults(pool_size=0, dataset_mode='volume')  # no image pooling
 
         opt, _ = parser.parse_known_args()
 
@@ -64,9 +73,13 @@ class CUTModel(BaseModel):
         self.visual_names = ['real_A', 'fake_B', 'real_B']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
 
+        self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
+        self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
+        self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
+
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
-            self.visual_names += ['idt_B']
+            self.visual_names += ['idt_B_center_sag', 'idt_B_center_cor', 'idt_B_center_axi']
 
         if self.isTrain:
             self.model_names = ['G', 'F', 'D']
@@ -74,11 +87,15 @@ class CUTModel(BaseModel):
             self.model_names = ['G']
 
         # define networks (both generator and discriminator)
-        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias, opt.no_antialias_up, self.gpu_ids, opt)
-        self.netF = networks.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
+                                      opt.init_type, opt.init_gain, opt.no_antialias, opt.no_antialias_up, self.gpu_ids,
+                                      opt)
+        self.netF = networks.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
+                                      opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
 
         if self.isTrain:
-            self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+            self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type,
+                                          opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
 
             # define loss functions
             self.criterionGAN_syn = networks.GANLoss(opt.gan_mode).to(self.device)
@@ -105,13 +122,13 @@ class CUTModel(BaseModel):
         self.real_A = self.real_A[:bs_per_gpu]
         self.real_B = self.real_B[:bs_per_gpu]
 
-
-        self.forward()                     # compute fake images: G(A)
+        self.forward()  # compute fake images: G(A)
         if self.opt.isTrain:
-            self.compute_D_loss().backward()                  # calculate gradients for D
-            self.compute_G_loss().backward()                   # calculate graidents for G
+            self.compute_D_loss().backward()  # calculate gradients for D
+            self.compute_G_loss().backward()  # calculate graidents for G
             if self.opt.lambda_NCE > 0.0:
-                self.optimizer_F = torch.optim.Adam(self.netF.parameters(), lr=self.opt.lr, betas=(self.opt.beta1, self.opt.beta2))
+                self.optimizer_F = torch.optim.Adam(self.netF.parameters(), lr=self.opt.lr,
+                                                    betas=(self.opt.beta1, self.opt.beta2))
                 self.optimizers.append(self.optimizer_F)
 
     def optimize_parameters(self):
@@ -153,9 +170,10 @@ class CUTModel(BaseModel):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # Both real_B and real_A if we also use the loss from the identity mapping: NCE(G(Y), Y)) in NCE loss
 
-        self.real = torch.cat((self.real_A, self.real_B), dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
+        self.real = torch.cat((self.real_A, self.real_B),
+                              dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
 
-        #Inspired by GcGAN, FastCUT is trained with flip-equivariance augmentation, where
+        # Inspired by GcGAN, FastCUT is trained with flip-equivariance augmentation, where
         # the input image to the generator is horizontally flipped, and the output features
         # are flipped back before computing the PatchNCE loss
         if self.opt.flip_equivariance:
@@ -168,7 +186,6 @@ class CUTModel(BaseModel):
         self.fake_B = self.fake[:self.real_A.size(0)]
         if self.opt.nce_idt:
             self.idt_B = self.fake[self.real_A.size(0):]
-
 
     def compute_D_loss(self):
         """Calculate GAN loss for the discriminator"""
@@ -202,7 +219,6 @@ class CUTModel(BaseModel):
         else:
             self.loss_NCE, self.loss_NCE_bd = 0.0, 0.0
 
-
         # For contrastive loss between Y and G(Y) but nce_idt is by default 0.0
         # Lambda = 1 by default
         if self.opt.nce_idt and self.opt.lambda_NCE > 0.0:
@@ -218,11 +234,10 @@ class CUTModel(BaseModel):
         n_layers = len(self.nce_layers)
 
         # Only use the encoder part of the networks
-        #the encoder learns to pay attention to the commonalities between the
+        # the encoder learns to pay attention to the commonalities between the
         # two domains, such as object parts and shapes, while being invariant
         # to the differences, such as the textures of the animals.
         feat_q = self.netG(tgt, layers=self.nce_layers, encode_only=True)
-
 
         if self.opt.flip_equivariance and self.flipped_for_equivariance:
             feat_q = [torch.flip(fq, [3]) for fq in feat_q]
@@ -245,24 +260,35 @@ class CUTModel(BaseModel):
 
         return total_nce_loss / n_layers
 
-    def log_tensorboard(self, writer: SummaryWriter, total_iter: int):
-        ['G_GAN', 'D_real', 'D_fake', 'G', 'NCE']
-
-        writer.add_scalar("LossD/fake", self.loss_D_fake.detach(), global_step=total_iter)
-        writer.add_scalar("LossD/real", self.loss_D_real.detach(), global_step=total_iter)
-
-        writer.add_scalar("LossG/G_GAN", self.loss_G_GAN.detach(), global_step=total_iter)
-        writer.add_scalar("LossG/G", self.loss_G.detach(), global_step=total_iter)
-        writer.add_scalar("LossNCE/NCE", self.loss_NCE.detach(), global_step=total_iter)
-        #     writer.add_scalar("Loss/max_output", self.max_output.detach(), global_step=total_iter)
-        # torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0, 0, 0))
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int):
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
 
-        monai.visualize.img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real A", max_out=85,image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),global_step=total_iter)
-        monai.visualize.img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real B", max_out=85,image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),global_step=total_iter)
-        monai.visualize.img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Fake B", max_out=85,image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),global_step=total_iter)
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real A", max_out=85,
+                                         image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
+                                         global_step=global_step)
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real B", max_out=85,
+                                         image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
+                                         global_step=global_step)
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Fake B", max_out=85,
+                                         image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
+                                         global_step=global_step)
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="IDT B", max_out=85,
+                                         image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
+                                         global_step=global_step)
+
+        axs, fig = vxm.torch.utils.init_figure(3, 4)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
+
+        writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
+
+        for key in losses:
+            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
@@ -282,6 +308,11 @@ class CUTModel(BaseModel):
         self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
         self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
 
-        self.empty_img_1 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_2 = torch.zeros_like(self.real_A_center_axi)
-        self.empty_img_3 = torch.zeros_like(self.real_A_center_axi)
+        n_c = int(self.real_A.shape[2] / 2)
+        self.idt_B_center_sag = self.idt_B[:, :, n_c, ...]
+
+        n_c = int(self.real_A.shape[3] / 2)
+        self.idt_B_center_cor = self.idt_B[..., n_c, :]
+
+        n_c = int(self.real_A.shape[4] / 2)
+        self.idt_B_center_axi = self.idt_B[..., n_c]

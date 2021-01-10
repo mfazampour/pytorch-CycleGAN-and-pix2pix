@@ -65,9 +65,9 @@ class BaseOptions():
         parser.add_argument('--verbose', action='store_true', help='if specified, print more debugging information')
         parser.add_argument('--suffix', default='', type=str, help='customized suffix: opt.name = opt.name + suffix: e.g., {model}_{netG}_size{load_size}')
         parser.add_argument('--tensorboard_path', default=None, type=str, help='Address for saving the tensorboard files')
-        parser.add_argument('--val_fold', default='/validation/', type=str, help='Validation folder name')
-        parser.add_argument('--train_fold', default='/train/', type=str, help='Train folder name')
-        parser.add_argument('--test_fold', default='/test/', type=str, help='Test folder name')
+        parser.add_argument('--val_fold', default='validation/', type=str, help='Validation folder name')
+        parser.add_argument('--train_fold', default='train/', type=str, help='Train folder name')
+        parser.add_argument('--test_fold', default='test/', type=str, help='Test folder name')
 
         # parameters related to StyleGAN2-based networks
         parser.add_argument('--stylegan2_G_num_downsampling',
@@ -166,4 +166,8 @@ class BaseOptions():
             torch.cuda.set_device(opt.gpu_ids[0])
 
         self.opt = opt
+        self.make_opt_compatible()
         return self.opt
+
+    def make_opt_compatible(self):
+        self.opt.norm = self.opt.normG

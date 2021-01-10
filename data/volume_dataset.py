@@ -1,5 +1,5 @@
-
 import os.path
+
 os.environ["TORCHIO_HIDE_CITATION_PROMPT"] = str(1)
 
 import random
@@ -50,7 +50,7 @@ class VolumeDataset(BaseDataset):
 
         return parser
 
-    def __init__(self, opt, to_validate):
+    def __init__(self, opt, to_validate=False):
         """Initialize this dataset class.
         Parameters:
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
@@ -58,18 +58,13 @@ class VolumeDataset(BaseDataset):
         BaseDataset.__init__(self, opt)
         self.opt = opt
         if to_validate:
-          #  self.root = self.opt.dataroot
-            self.root = self.opt.dataroot + self.opt.val_fold
+            self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
+        else:
+            self.root = os.path.join(self.opt.dataroot, self.opt.train_fold)
 
-        if not to_validate:
-            print(f'dataroot   {self.opt.dataroot}')
-          #  self.root = self.opt.dataroot
-            self.root = self.opt.dataroot + self.opt.train_fold
-
-        #    self.root = opt.dataroot
+        print(f'dataroot: {self.root}')
         self.load_mask = opt.load_mask
         self.patient = self.read_list_of_patients()
-
 
         random.shuffle(self.patient)
         self.subjects = {}
@@ -119,11 +114,9 @@ class VolumeDataset(BaseDataset):
         for root, dirs, files in os.walk(self.root):
             if ('nonrigid' in root) or ('cropped' not in root) or ('@eaDir' in root):
                 continue
-            if os.path.exists(root+"/trus.mhd") and os.path.exists(root+"/mr.mhd"):
+            if os.path.exists(root + "/trus.mhd") and os.path.exists(root + "/mr.mhd"):
                 patients.append(root)
         return patients
-
-
 
     def __getitem__(self, index):
         sample, subject = self.load_subject_(index)

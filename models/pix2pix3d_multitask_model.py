@@ -151,7 +151,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
     def set_visdom_names(self):
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
-        self.loss_names = ['G_GAN', 'G_L1', 'D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
+        self.loss_names = ['G', 'G_GAN', 'G_L1', 'D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
@@ -353,7 +353,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
-       # super().compute_visuals()
+        super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
 
