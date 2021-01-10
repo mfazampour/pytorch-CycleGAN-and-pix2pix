@@ -50,7 +50,7 @@ class VolumeDataset(BaseDataset):
 
         return parser
 
-    def __init__(self, opt, to_validate):
+    def __init__(self, opt, to_validate=False):
         """Initialize this dataset class.
         Parameters:
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
@@ -58,15 +58,11 @@ class VolumeDataset(BaseDataset):
         BaseDataset.__init__(self, opt)
         self.opt = opt
         if to_validate:
-            #  self.root = self.opt.dataroot
-            self.root = self.opt.dataroot + self.opt.val_fold
+            self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
+        else:
+            self.root = os.path.join(self.opt.dataroot, self.opt.train_fold)
 
-        if not to_validate:
-            print(f'dataroot   {self.opt.dataroot}')
-            #  self.root = self.opt.dataroot
-            self.root = self.opt.dataroot + self.opt.train_fold
-
-        #    self.root = opt.dataroot
+        print(f'dataroot: {self.root}')
         self.load_mask = opt.load_mask
         self.patient = self.read_list_of_patients()
 
