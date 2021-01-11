@@ -87,6 +87,7 @@ if __name__ == '__main__':
             if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
                 losses = model.get_current_losses()  # read losses before setting to no_grad for validation
                 data = next(iter(dataset_val))
+                model.eval()  # change networks to eval mode
                 with torch.no_grad():
                     model.set_input(data)  # unpack data from data loader
                     model.test()  # run inference
@@ -94,6 +95,7 @@ if __name__ == '__main__':
                 visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
                 if hasattr(model, 'log_tensorboard'):
                     model.log_tensorboard(writer, losses, total_iters)
+                model.train()  # change networks back to train mode
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
