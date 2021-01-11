@@ -210,20 +210,24 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.netDefReg = networks3d.init_net(self.netDefReg, gpu_ids=self.gpu_ids)
 
         self.netSeg = networks3d.define_G(opt.input_nc, opt.num_classes, opt.ngf,
-                                          opt.netSeg, opt.norm, not opt.no_dropout,
+                                          opt.netSeg, opt.norm, use_dropout=not opt.no_dropout,
                                           gpu_ids=self.gpu_ids, is_seg_net=True)
         self.transformer = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
                                                gpu_ids=self.gpu_ids)
         self.resizer = networks3d.init_net(vxm.layers.ResizeTransform(vel_resize=0.5, ndims=3), gpu_ids=self.gpu_ids)
 
         # define networks (both generator and discriminator)
-        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
-                                      opt.init_type, opt.init_gain, opt.no_antialias, opt.no_antialias_up, self.gpu_ids,
-                                      opt)
-        self.netF = networks.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
-                                      opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+        self.netG = networks3d.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
+                                        opt.init_type, init_gain=opt.init_gain, no_antialias=opt.no_antialias,
+                                        no_antialias_up= opt.no_antialias_up, gpu_ids=self.gpu_ids, opt=opt)
 
-        self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type, opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+        self.netF = networks3d.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
+                                        init_gain=opt.init_gain, no_antialias=opt.no_antialias,
+                                        gpu_ids=self.gpu_ids, opt=opt)
+
+        self.netD = networks3d.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type,
+                                        init_gain=opt.init_gain, no_antialias=opt.no_antialias,
+                                        gpu_ids=self.gpu_ids, opt=opt)
 
 
     def set_visdom_names(self):
