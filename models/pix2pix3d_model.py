@@ -71,12 +71,12 @@ class Pix2Pix3dModel(BaseModel):
 
         # load/define networks
         self.netG = networks3d.define_G(opt.input_nc, opt.output_nc, opt.ngf,
-                                        opt.netG, opt.norm, not opt.no_dropout, gpu_ids=self.gpu_ids)
+                                        opt.netG, opt.norm, use_dropout=not opt.no_dropout, gpu_ids=self.gpu_ids)
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
             self.netD = networks3d.define_D(opt.input_nc + opt.output_nc, opt.ndf,
-                                            opt.netD,
-                                            opt.n_layers_D, opt.norm, use_sigmoid=use_sigmoid, gpu_ids=self.gpu_ids)
+                                            opt.netD, opt.n_layers_D, norm=opt.norm,
+                                            use_sigmoid=use_sigmoid, gpu_ids=self.gpu_ids)
 
         if self.isTrain:
             # define loss functions

@@ -3,15 +3,18 @@ import os
 
 import numpy as np
 import torch
-from .base_model import BaseModel
-from . import networks
-from .patchnce import PatchNCELoss
-import util.util as util
 from monai.visualize import img2tensorboard
 from torch.utils.tensorboard import SummaryWriter
 
+from .base_model import BaseModel
+from . import networks
+from . import networks3d
+from .patchnce import PatchNCELoss
+import util.util as util
+
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
+
 
 #
 class CUT3dModel(BaseModel):
@@ -87,15 +90,15 @@ class CUT3dModel(BaseModel):
             self.model_names = ['G']
 
         # define networks (both generator and discriminator)
-        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
-                                      opt.init_type, opt.init_gain, opt.no_antialias, opt.no_antialias_up, self.gpu_ids,
-                                      opt)
-        self.netF = networks.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
-                                      opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+        self.netG = networks3d.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
+                                        opt.init_type, opt.init_gain, no_antialias=opt.no_antialias,
+                                        no_antialias_up=opt.no_antialias_up, gpu_ids=self.gpu_ids, opt=opt)
+        self.netF = networks3d.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
+                                        opt.init_gain, opt.no_antialias, gpu_ids=self.gpu_ids, opt=opt)
 
         if self.isTrain:
-            self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type,
-                                          opt.init_gain, opt.no_antialias, self.gpu_ids, opt)
+            self.netD = networks3d.define_D(opt.output_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.normD, opt.init_type,
+                                            opt.init_gain, no_antialias=opt.no_antialias, gpu_ids=self.gpu_ids, opt=opt)
 
             # define loss functions
             self.criterionGAN_syn = networks.GANLoss(opt.gan_mode).to(self.device)
