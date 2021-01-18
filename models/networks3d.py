@@ -194,6 +194,9 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
     elif netG == 'unet_128':
         net = UnetGenerator3d(input_nc, output_nc, 7, ngf, norm_layer=norm_layer,
                               use_dropout=use_dropout, last_layer=last_layer, is_seg_net=is_seg_net)
+    elif netG == 'unet_small':
+        net = UnetGenerator3d(input_nc, output_nc, 4, ngf, norm_layer=norm_layer,
+                              use_dropout=use_dropout, last_layer=last_layer, is_seg_net=is_seg_net)
     elif netG == 'unet_256':
         net = UnetGenerator3d(input_nc, output_nc, 8, ngf, norm_layer=norm_layer,
                               use_dropout=use_dropout, last_layer=last_layer, is_seg_net=is_seg_net)
@@ -746,13 +749,10 @@ class UnetGenerator3d(nn.Module):
             self.model = UnetSkipConnectionBlock3d(output_nc, ngf, submodule=unet_block, outermost=True,
                                                    norm_layer=norm_layer, last_layer=last_layer)
 
-    def forward(self, input):
-        return self.model(input)
+    def forward(self, input, layers=[], encode_only=False):
+        return self.model(input, layers=layers, encode_only=encode_only)
 
 
-# Defines the submodule with skip connection.
-# X -------------------identity---------------------- X
-#   |-- downsampling -- |submodule| -- upsampling --|
 class UnetSkipConnectionBlock3d(nn.Module):
     """Defines the Unet submodule with skip connection.
             X -------------------identity----------------------
@@ -798,6 +798,7 @@ class UnetSkipConnectionBlock3d(nn.Module):
             if last_layer is not None:
                 up.append(last_layer)
             model = down + [submodule] + up
+            self.nce_layers_id = 1
         elif innermost:
             upconv = nn.ConvTranspose3d(inner_nc, outer_nc,
                                         kernel_size=4, stride=2,
@@ -805,6 +806,7 @@ class UnetSkipConnectionBlock3d(nn.Module):
             down = [downrelu, downconv]
             up = [uprelu, upconv, upnorm]
             model = down + up
+            self.nce_layers_id = 2
         else:
             upconv = nn.ConvTranspose3d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
@@ -816,10 +818,26 @@ class UnetSkipConnectionBlock3d(nn.Module):
                 model = down + [submodule] + up + [nn.Dropout(0.5)]
             else:
                 model = down + [submodule] + up
+            self.nce_layers_id = 3
 
         self.model = nn.Sequential(*model)
 
-    def forward(self, x):
+    def forward(self, x, encode_only=False, layers=[]):
+        if encode_only:
+            feat = x
+            feats = []
+            for layer_id, layer in enumerate(self.model):
+                if isinstance(layer, UnetSkipConnectionBlock3d):
+                    feats.append(feat)
+                    feats_ = layer(feat, encode_only)
+                    feats += feats_
+                    return feats
+                else:
+                    feat = layer(feat)
+                if layer_id == self.nce_layers_id:
+                    if len(feats) == 0:
+                        feats.append(feat)
+                    return feats
         if self.outermost:
             return self.model(x)
         else:  # add skip connections
