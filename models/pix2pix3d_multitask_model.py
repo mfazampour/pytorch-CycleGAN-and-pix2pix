@@ -142,7 +142,7 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         self.netDefReg = networks3d.init_net(self.netDefReg, gpu_ids=self.gpu_ids)
 
         self.netSeg = networks3d.define_G(opt.input_nc, opt.num_classes, opt.ngf,
-                                          opt.netSeg, opt.norm, not opt.no_dropout,
+                                          opt.netSeg, opt.norm, use_dropout=not opt.no_dropout,
                                           gpu_ids=self.gpu_ids, is_seg_net=True)
         self.transformer = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
                                                gpu_ids=self.gpu_ids)
