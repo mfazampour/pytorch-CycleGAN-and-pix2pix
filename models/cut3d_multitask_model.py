@@ -397,7 +397,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
         seg_B = self.netSeg(self.real_B)
-        mask_A_deformed = self.transformer_label(self.mask_A, dvf)
+        mask_A_deformed = self.transformer_label(self.mask_A, self.resizer(dvf))
         self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
 
         seg_fake_B = self.netSeg(self.fake_B.detach())
@@ -435,8 +435,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizer_RigidReg.step()
 
         # update deformable registration and segmentation network
-        if (1 - self.first_phase_coeff) == 0:
-            return
+        # if (1 - self.first_phase_coeff) == 0:
+        #     return
         self.set_requires_grad(self.netDefReg, True)
         self.set_requires_grad(self.netSeg, True)
         self.optimizer_DefReg.zero_grad()
