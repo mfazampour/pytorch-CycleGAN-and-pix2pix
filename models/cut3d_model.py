@@ -268,16 +268,16 @@ class CUT3dModel(BaseModel):
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
 
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real A", max_out=85,
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
                                          image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
                                          global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Real B", max_out=85,
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
                                          image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
                                          global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="Fake B", max_out=85,
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
                                          image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
                                          global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="IDT B", max_out=85,
+        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/IDT B", max_out=85,
                                          image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
                                          global_step=global_step)
 
@@ -287,8 +287,7 @@ class CUT3dModel(BaseModel):
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
         vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
-
-        writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
+        writer.add_figure(tag='GAN', figure=fig, global_step=global_step)
 
         for key in losses:
             writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
