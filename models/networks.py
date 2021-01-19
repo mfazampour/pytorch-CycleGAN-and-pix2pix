@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +12,8 @@ from torch._six import container_abcs
 from itertools import repeat
 
 from util import se3
+os.environ['VXM_BACKEND'] = 'pytorch'
+from voxelmorph import voxelmorph as vxm
 
 ###############################################################################
 # Helper Functions
@@ -1544,3 +1548,19 @@ class GradLoss(nn.Module):
         if self.loss_mult is not None:
             grad *= self.loss_mult
         return grad
+
+
+##########################################################################
+## NCC loss nn module using voxelmorph NCC
+##
+##########################################################################
+
+class NCCLoss(nn.Module):
+    def __init__(self, win=None):
+        super().__init__()
+        self.win = win
+        self.ncc_loss = vxm.losses.NCC(win=win)
+
+    def forward(self, y_true, y_pred):
+        return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred)
+
