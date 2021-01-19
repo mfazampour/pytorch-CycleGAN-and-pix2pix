@@ -18,7 +18,7 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 
-class CUT3DMultiTask3dModel(CUT3dModel):
+class CUT3DMultiTaskModel(CUT3dModel):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
@@ -77,6 +77,7 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         parser.add_argument('--flip_equivariance',
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
+        parser.add_argument('--use_rigid_branch', action='store_true', help='train the rigid registration network')
 
         parser.set_defaults(pool_size=0)  # no image pooling
         if is_train:
@@ -150,7 +151,7 @@ class CUT3DMultiTask3dModel(CUT3dModel):
 
             self.optimizers.append(self.optimizer_RigidReg)
 
-            self.criterionDefReg = torch.nn.MSELoss()  # TODO change later to sth more meaningful (LCC?!)
+            self.criterionDefReg = networks.NCCLoss()
             self.criterionDefRgl = networks.GradLoss('l2', loss_mult=opt.int_downsize)
             self.optimizer_DefReg = torch.optim.Adam(self.netDefReg.parameters(), lr=opt.lr_Def)
             self.optimizers.append(self.optimizer_DefReg)
@@ -187,7 +188,7 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         # We are using DenseNet for rigid registration -- actually DenseNet didn't provide any performance improvement
         # TODO change this to obelisk net
         self.netRigidReg = networks3d.define_reg_model(model_type=self.opt.netReg, n_input_channels=2,
-                                                       num_classes=6, gpu_ids=self.gpu_ids)
+                                                       num_classes=6, gpu_ids=self.gpu_ids, img_shape=opt.inshape)
         # extract shape from sampled input
         inshape = opt.inshape
         # device handling
@@ -212,8 +213,10 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.netSeg = networks3d.define_G(opt.input_nc, opt.num_classes, opt.ngf,
                                           opt.netSeg, opt.norm, use_dropout=not opt.no_dropout,
                                           gpu_ids=self.gpu_ids, is_seg_net=True)
-        self.transformer = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
-                                               gpu_ids=self.gpu_ids)
+        self.transformer_label = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
+                                                     gpu_ids=self.gpu_ids)
+        self.transformer_intensity = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape),
+                                                     gpu_ids=self.gpu_ids)
         self.resizer = networks3d.init_net(vxm.layers.ResizeTransform(vel_resize=0.5, ndims=3), gpu_ids=self.gpu_ids)
 
         # define networks (both generator and discriminator)
@@ -303,25 +306,27 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.loss_DefRgl = torch.tensor([0.0])
         self.loss_Seg_real = torch.tensor([0.0])
         self.loss_Seg_fake = torch.tensor([0.0])
-
         self.loss_Seg = torch.tensor([0.0])
-
         self.loss_G_NCE = torch.tensor([0.0])
+        self.loss_RigidReg_fake = torch.tensor([0.0])
+        self.loss_RigidReg_real = torch.tensor([0.0])
+        self.loss_RigidReg = torch.tensor([0.0])
 
     def forward(self):
         super().forward()
         self.reg_A_params = self.netRigidReg(torch.cat([self.fake_B, self.transformed_B], dim=1))
         self.reg_B_params = self.netRigidReg(torch.cat([self.real_B, self.transformed_B], dim=1))
 
-        def_reg_output = self.netDefReg(self.real_B, self.fake_B, registration=not self.isTrain)
+        def_reg_output = self.netDefReg(self.fake_B, self.real_B, registration=not self.isTrain)
         if self.opt.bidir:
-            (self.deformed_B, self.deformed_fake_B, self.dvf) = def_reg_output
+            (self.deformed_fake_B, self.deformed_B, self.dvf) = def_reg_output
         else:
-            (self.deformed_B, self.dvf) = def_reg_output
+            (self.deformed_fake_B, self.dvf) = def_reg_output
 
         if self.isTrain:
             self.dvf = self.resizer(self.dvf)
-        self.seg_B = self.netSeg(self.deformed_B)
+        self.deformed_A = self.transformer_intensity(self.real_A, self.dvf.detach())
+        self.seg_B = self.netSeg(self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
 
     def backward_G(self):
@@ -374,16 +379,16 @@ class CUT3DMultiTask3dModel(CUT3dModel):
 
 
     def bacward_DefReg_Seg(self):
-        def_reg_output = self.netDefReg(self.real_B, self.fake_B.detach())
+        def_reg_output = self.netDefReg(self.fake_B.detach(), self.real_B)  # fake_B is the moving image here
         if self.opt.bidir:
-            (deformed_B, deformed_fake_B, dvf) = def_reg_output
+            (deformed_fake_B, deformed_B, dvf) = def_reg_output
         else:
-            (deformed_B, dvf) = def_reg_output
+            (deformed_fake_B, dvf) = def_reg_output
 
-        self.loss_DefReg_real = self.criterionDefReg(deformed_B, self.fake_B.detach())  # TODO add weights same as vxm!
+        self.loss_DefReg_real = self.criterionDefReg(deformed_fake_B, self.real_B)  # TODO add weights same as vxm!
         self.loss_DefReg = self.loss_DefReg_real
         if self.opt.bidir:
-            self.loss_DefReg_fake = self.criterionDefReg(deformed_fake_B, self.real_B)
+            self.loss_DefReg_fake = self.criterionDefReg(deformed_B, self.fake_B.detach())
             self.loss_DefReg += self.loss_DefReg_fake
         else:
             self.loss_DefReg_fake = torch.tensor([0.0])
@@ -391,8 +396,9 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.loss_DefReg += self.loss_DefRgl
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
-        seg_B = self.netSeg(deformed_B)
-        self.loss_Seg_real = self.criterionSeg(seg_B, self.mask_A)
+        seg_B = self.netSeg(self.real_B)
+        mask_A_deformed = self.transformer_label(self.mask_A, dvf)
+        self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
 
         seg_fake_B = self.netSeg(self.fake_B.detach())
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
@@ -422,10 +428,11 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         self.optimizer_G.step()  # update G's weights
 
         # update rigid registration network
-        self.set_requires_grad(self.netRigidReg, True)
-        self.optimizer_RigidReg.zero_grad()
-        self.backward_RigidReg()
-        self.optimizer_RigidReg.step()
+        if self.opt.use_rigid_branch:
+            self.set_requires_grad(self.netRigidReg, True)
+            self.optimizer_RigidReg.zero_grad()
+            self.backward_RigidReg()
+            self.optimizer_RigidReg.step()
 
         # update deformable registration and segmentation network
         if (1 - self.first_phase_coeff) == 0:
@@ -508,15 +515,15 @@ class CUT3DMultiTask3dModel(CUT3dModel):
 
         n_c = int(self.real_A.shape[2] / 2)
         self.dvf_center_sag = self.dvf[:, :, n_c, ...]
-        self.deformed_B_center_sag = self.deformed_B[:, :, n_c, ...]
+        self.deformed_B_center_sag = self.deformed_A[:, :, n_c, ...]
 
         n_c = int(self.real_A.shape[3] / 2)
         self.dvf_center_cor = self.dvf[..., n_c, :]
-        self.deformed_B_center_cor = self.deformed_B[..., n_c, :]
+        self.deformed_B_center_cor = self.deformed_A[..., n_c, :]
 
         n_c = int(self.real_A.shape[4] / 2)
         self.dvf_center_axi = self.dvf[:, :, ..., n_c]
-        self.deformed_B_center_axi = self.deformed_B[..., n_c]
+        self.deformed_B_center_axi = self.deformed_A[..., n_c]
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
@@ -537,7 +544,7 @@ class CUT3DMultiTask3dModel(CUT3dModel):
         vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[8, :], img_name='Seg Fake')
         vxm.torch.utils.fill_subplots(self.seg_B.cpu(), axs=axs[9, :], img_name='Seg B')
         vxm.torch.utils.fill_subplots(self.dvf.cpu().detach().cpu(), axs=axs[10, :], img_name='DVF', cmap=None)
-        vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[11, :], img_name='Deformed')
+        vxm.torch.utils.fill_subplots(self.deformed_A.detach().cpu(), axs=axs[11, :], img_name='Deformed')
 
         writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
 

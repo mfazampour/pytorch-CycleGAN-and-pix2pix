@@ -734,14 +734,18 @@ class UnetGenerator3d(nn.Module):
                  norm_layer=nn.BatchNorm3d, use_dropout=False, last_layer=nn.Tanh(), is_seg_net=False):
         super(UnetGenerator3d, self).__init__()
 
+        coeff = np.power(2, np.min([num_downs, 5]) - 2).astype(int)
         # construct unet structure
-        unet_block = UnetSkipConnectionBlock3d(ngf * 8, ngf * 8, norm_layer=norm_layer, innermost=True)
+        unet_block = UnetSkipConnectionBlock3d(ngf * coeff, ngf * coeff, norm_layer=norm_layer, innermost=True)
         for i in range(num_downs - 5):
-            unet_block = UnetSkipConnectionBlock3d(ngf * 8, ngf * 8, submodule=unet_block, norm_layer=norm_layer,
+            unet_block = UnetSkipConnectionBlock3d(ngf * coeff, ngf * coeff, submodule=unet_block, norm_layer=norm_layer,
                                                    use_dropout=use_dropout)
-        unet_block = UnetSkipConnectionBlock3d(ngf * 4, ngf * 8, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock3d(ngf * 2, ngf * 4, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock3d(ngf, ngf * 2, submodule=unet_block, norm_layer=norm_layer)
+        if num_downs >= 5:
+            unet_block = UnetSkipConnectionBlock3d(ngf * int(coeff/2), ngf * coeff, submodule=unet_block, norm_layer=norm_layer)
+            coeff = int(coeff / 2)
+        unet_block = UnetSkipConnectionBlock3d(ngf * int(coeff/2), ngf * coeff, submodule=unet_block, norm_layer=norm_layer)
+        coeff = int(coeff / 2)  # this should equal to 2
+        unet_block = UnetSkipConnectionBlock3d(ngf, ngf * coeff, submodule=unet_block, norm_layer=norm_layer)
         if is_seg_net:
             self.model = UnetSkipConnectionBlock3d(output_nc, ngf, input_nc=1, submodule=unet_block, outermost=True,
                                                    norm_layer=norm_layer, last_layer=last_layer)
@@ -1648,9 +1652,13 @@ class NormalNet(nn.Module):
 
         sequence += [nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]
 
-        sequence += [nn.Flatten(),
-                     nn.Linear(216, num_classes, bias=False)]
+        sequence += [nn.Flatten()]
+        self.model = nn.Sequential(*sequence)
 
+        input_ = torch.zeros((1, input_nc, *img_shape))
+        out = self.model(input_)
+        n = out.shape[1]
+        sequence += [nn.Linear(n, num_classes, bias=False)]  # TODO: make this dynamic
         self.model = nn.Sequential(*sequence)
 
     def forward(self, input_):
