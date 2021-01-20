@@ -27,28 +27,35 @@ environment:
     gpu:
       requests: 1
       limits: 1
+  node_selector:
+    nvidiaDriver: "450"
 
 params:
   dataroot: "/Prostate_Reg_KM/anonymized"
-  dataset_mode: volume
+  dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
-  lr_policy: step
-  display_freq: 2
+  lr: 0.00001
+  lr_policy: "linear"
+  display_freq: 50
+  print_freq: 20
   lr_decay_iters: 1
   batch_size: 1
   epoch_count: 0
-  n_epochs: 100
-  netG: resnet_cat
-  CUT_mode: CUT
-  model: cut3d_multitask
-  val_fold: /validation/
-  train_fold: /train/
+  n_epochs: 50
+  netG: "resnet_cat"
+  CUT_mode: "CUT"
+  model: "cut3d_multitask"
+  name: "cut3d"
+  val_fold: "validation/"
+  train_fold: "train/"
   load_mask: True
   display_id: -1
-  load_init_models: /data/Prostate_Reg_KM/multitask/init_weights_cut/
-  epochs_before_reg: 1
+  load_init_models: "/data/Prostate_Reg_KM/multitask/init_weights_cut_2/"
+  epochs_before_reg: 0
   epoch: init
+  netReg: "NormalNet"
+  netSeg: "unet_small"
 
 
 
@@ -58,8 +65,10 @@ run:
                                     --dataset_mode={{ dataset_mode }} \
                                     --output_nc={{ output_nc }} \
                                     --input_nc={{ input_nc }} \
+                                    --lr {{ lr }}
                                     --lr_policy={{ lr_policy }} \
                                     --display_freq={{ display_freq }} \
+                                    --print_freq {{ print_freq }}
                                     --lr_decay_iters {{ lr_decay_iters }} \
                                     --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
@@ -73,5 +82,7 @@ run:
                                     --epochs_before_reg={{ epochs_before_reg }} \
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
-                                    --continue_train
+                                    --continue_train \
+                                    --netReg {{ netReg }} \
+                                    --netSeg  {{ netSeg }}
 
