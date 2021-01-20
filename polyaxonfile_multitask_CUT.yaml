@@ -35,7 +35,10 @@ params:
   dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
-  lr: 0.00001
+  lr: 0.000001
+  lr_Def: 0.0001
+  lr_Seg: 0.0001
+  lr_Reg: 0.0001
   lr_policy: "linear"
   display_freq: 50
   print_freq: 20
@@ -65,7 +68,10 @@ run:
                                     --dataset_mode={{ dataset_mode }} \
                                     --output_nc={{ output_nc }} \
                                     --input_nc={{ input_nc }} \
-                                    --lr {{ lr }}
+                                    --lr {{ lr }} \
+                                    --lr_Def {{ lr_Def }} \
+                                    --lr_Seg {{ lr_Seg }} \
+                                    --lr_Reg {{ lr_Reg }} \
                                     --lr_policy={{ lr_policy }} \
                                     --display_freq={{ display_freq }} \
                                     --print_freq {{ print_freq }}
@@ -84,5 +90,5 @@ run:
                                     --display_id={{ display_id }} \
                                     --continue_train \
                                     --netReg {{ netReg }} \
-                                    --netSeg  {{ netSeg }}
-
+                                    --netSeg  {{ netSeg }} \
+                                    --reg_idt_B

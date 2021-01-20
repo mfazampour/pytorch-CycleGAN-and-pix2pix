@@ -78,6 +78,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
         parser.add_argument('--use_rigid_branch', action='store_true', help='train the rigid registration network')
+        parser.add_argument('--reg_idt_B', action='store_true', help='use idt_B from CUT model instead of real B')
 
         parser.set_defaults(pool_size=0)  # no image pooling
         if is_train:
@@ -85,10 +86,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
-            parser.add_argument('--lr_Reg', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lr_Reg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
-            parser.add_argument('--lr_Def', type=float, default=0.00001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -127,28 +129,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.set_networks(opt)
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
 
-
         if self.isTrain:
-            # define loss functions
-
-            # define loss functions
-            self.criterionGAN_syn = networks.GANLoss(opt.gan_mode).to(self.device)
-            self.criterionNCE = []
-
-            for nce_layer in self.nce_layers:
-                self.criterionNCE.append(PatchNCELoss(opt).to(self.device))
 
             self.criterionRigidReg = networks.RegistrationLoss()
             self.optimizer_RigidReg = torch.optim.Adam(self.netRigidReg.parameters(), lr=opt.lr_Reg,
                                                        betas=(opt.beta1, 0.999))
-
-
-            self.criterionIdt = torch.nn.L1Loss().to(self.device)
-            self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
-            self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
-            self.optimizers.append(self.optimizer_G)
-            self.optimizers.append(self.optimizer_D)
-
             self.optimizers.append(self.optimizer_RigidReg)
 
             self.criterionDefReg = networks.NCCLoss()
@@ -157,7 +142,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizers.append(self.optimizer_DefReg)
 
             self.criterionSeg = networks.DiceLoss()
-            self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
 
@@ -174,14 +159,14 @@ class CUT3DMultiTaskModel(CUT3dModel):
             return self.netG
         if name == 'F':
             return self.netF
-        if name =='D':
+        if name == 'D':
             return self.netD
 
     def set_networks(self, opt):
         # specify the models you want to save to the disk. The training/test scripts will call
         # <BaseModel.save_networks> and <BaseModel.load_networks>
         if self.isTrain:
-            self.model_names = ['G', 'D', 'F' ,'RigidReg', 'DefReg', 'Seg']
+            self.model_names = ['G', 'D', 'F', 'RigidReg', 'DefReg', 'Seg']
         else:  # during test time, only load G
             self.model_names = ['G', 'RigidReg', 'DefReg', 'Seg']
 
@@ -216,13 +201,13 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.transformer_label = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
                                                      gpu_ids=self.gpu_ids)
         self.transformer_intensity = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape),
-                                                     gpu_ids=self.gpu_ids)
+                                                         gpu_ids=self.gpu_ids)
         self.resizer = networks3d.init_net(vxm.layers.ResizeTransform(vel_resize=0.5, ndims=3), gpu_ids=self.gpu_ids)
 
         # define networks (both generator and discriminator)
         self.netG = networks3d.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.normG, not opt.no_dropout,
                                         opt.init_type, init_gain=opt.init_gain, no_antialias=opt.no_antialias,
-                                        no_antialias_up= opt.no_antialias_up, gpu_ids=self.gpu_ids, opt=opt)
+                                        no_antialias_up=opt.no_antialias_up, gpu_ids=self.gpu_ids, opt=opt)
 
         self.netF = networks3d.define_F(opt.input_nc, opt.netF, opt.normG, not opt.no_dropout, opt.init_type,
                                         init_gain=opt.init_gain, no_antialias=opt.no_antialias,
@@ -232,11 +217,10 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                         init_gain=opt.init_gain, no_antialias=opt.no_antialias,
                                         gpu_ids=self.gpu_ids, opt=opt)
 
-
     def set_visdom_names(self):
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
-        self.loss_names = ['G', 'G_NCE','D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
+        self.loss_names = ['G', 'G_NCE', 'D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
         if self.opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
@@ -263,7 +247,6 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.visual_names += ['deformed_B_center_sag', 'deformed_B_center_cor', 'deformed_B_center_axi']
         if self.opt.nce_idt and self.isTrain:
             self.visual_names += ['idt_B_center_sag', 'idt_B_center_cor', 'idt_B_center_axi']
-
 
     # def name(self):
     #     return 'Pix2Pix3dModel'
@@ -295,7 +278,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         if self.opt.show_volumes:
             affine_transform.show_volumes([self.real_B, self.transformed_B])
 
-        self.mask_A = input['A_mask'].to(self.device)
+        self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
 
         ###
         self.loss_DefReg_real = torch.tensor([0.0])
@@ -317,7 +300,9 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.reg_A_params = self.netRigidReg(torch.cat([self.fake_B, self.transformed_B], dim=1))
         self.reg_B_params = self.netRigidReg(torch.cat([self.real_B, self.transformed_B], dim=1))
 
-        def_reg_output = self.netDefReg(self.fake_B, self.real_B, registration=not self.isTrain)
+        fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
+        fixed = fixed * 0.5 + 0.5
+        def_reg_output = self.netDefReg(self.fake_B * 0.5 + 0.5, fixed, registration=not self.isTrain)
         if self.opt.bidir:
             (self.deformed_fake_B, self.deformed_B, self.dvf) = def_reg_output
         else:
@@ -326,23 +311,16 @@ class CUT3DMultiTaskModel(CUT3dModel):
         if self.isTrain:
             self.dvf = self.resizer(self.dvf)
         self.deformed_A = self.transformer_intensity(self.real_A, self.dvf.detach())
-        self.seg_B = self.netSeg(self.real_B)
+        self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
+        self.seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
 
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
 
-        self.loss_G_NCE = super().compute_G_loss()
-       # self.loss_G.backward()
-        # First, G(A) should fake the discriminator
-      #  fake_AB = torch.cat((self.real_A, self.fake_B), 1)
-       # pred_fake = self.netD(fake_AB)
+        self.loss_G_NCE = self.compute_G_loss()
 
-       # self.loss_G_GAN = self.criterionGAN_syn(pred_fake, True)
-        # Second, G(A) = B
-       # self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
-
-        # Third, rigid registration =
+        # Third, rigid registration
         loss_G_Reg = self.criterionRigidReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
 
         # fourth, Def registration:
@@ -356,9 +334,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         # combine loss and calculate gradients
         self.loss_G = self.loss_G_NCE * self.first_phase_coeff + \
-                      loss_G_Reg * (1 - self.first_phase_coeff) + \
                       loss_DefReg_fake * (1 - self.first_phase_coeff) + \
                       loss_G_Seg * (1 - self.first_phase_coeff)
+
+        if self.opt.use_rigid_branch:
+            self.loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
 
         self.loss_G.backward()
 
@@ -377,9 +357,10 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.loss_RigidReg = self.loss_RigidReg_real + self.loss_RigidReg_fake * (1 - self.first_phase_coeff)
         self.loss_RigidReg.backward()
 
-
     def bacward_DefReg_Seg(self):
-        def_reg_output = self.netDefReg(self.fake_B.detach(), self.real_B)  # fake_B is the moving image here
+        fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
+        fixed = fixed * 0.5 + 0.5
+        def_reg_output = self.netDefReg(self.fake_B.detach() * 0.5 + 0.5, fixed)  # fake_B is the moving image here
         if self.opt.bidir:
             (deformed_fake_B, deformed_B, dvf) = def_reg_output
         else:
@@ -396,8 +377,9 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.loss_DefReg += self.loss_DefRgl
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
-        seg_B = self.netSeg(self.real_B)
-        mask_A_deformed = self.transformer_label(self.mask_A, self.resizer(dvf))
+        seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
+        dvf_resized = self.resizer(dvf)
+        mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
         self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
 
         seg_fake_B = self.netSeg(self.fake_B.detach())
@@ -414,8 +396,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.optimizer_D.zero_grad()  # set D's gradients to zero
         self.loss_D = super().compute_D_loss()
         self.loss_D.backward()
-       # super().backward_D()  # calculate gradients for D
         self.optimizer_D.step()  # update D's weights
+
         # update G
         self.set_requires_grad(self.netD, False)  # D requires no gradients when optimizing G
         self.set_requires_grad(self.netRigidReg, False)
@@ -461,10 +443,12 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         reg_A, reg_B = self.get_transformed_images()
         self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
-                                                 affine_transform.tensor_vector_to_matrix(self.reg_B_params.detach()),
-                                                 device=self.transformed_LM_B.device)
+                                                                 affine_transform.tensor_vector_to_matrix(
+                                                                     self.reg_B_params.detach()),
+                                                                 device=self.transformed_LM_B.device)
 
-        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B, self.transformed_LM_B.device)
+        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
+                                                                          self.transformed_LM_B.device)
 
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
@@ -541,19 +525,24 @@ class CUT3DMultiTaskModel(CUT3dModel):
         vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
         writer.add_figure(tag='Rigid', figure=fig, global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
+        axs, fig = vxm.torch.utils.init_figure(3, 5)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask A')
         vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg Fake')
         vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[2, :], img_name='Seg B')
         overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Def mask overlay', cmap=None)
+        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Seg overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Seg overlay', cmap=None)
         writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 5)
+        axs, fig = vxm.torch.utils.init_figure(3, 6)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, ...], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
@@ -566,9 +555,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
         overlay *= 0.8
         overlay[:, 0:1, ...] += (0.5 * self.real_B.detach() + 0.5) * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. overlay', cmap=None)
+        overlay = self.mask_A.repeat(1, 3, 1, 1, 1)
+        overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
+        overlay[:, 2, ...] = 0
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Def. mask overlay', cmap=None)
         writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
 
         writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
-
-
