@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from collections import OrderedDict
 from typing import Tuple
 import util.util as util
@@ -39,7 +40,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
-        parser.add_argument('--epochs_before_reg', type=int, default=15,
+        parser.add_argument('--epochs_before_reg', type=int, default=0,
                             help='number of epochs to train the network before reg loss is used')
         parser.add_argument('--cudnn-nondet', action='store_true',
                             help='disable cudnn determinism - might slow down training')
@@ -93,6 +94,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--vxm_iteration_steps', type=int, default=1,
                                 help='number of steps to train the registration network for each simulated US')
+            parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
+                                help='type of the similarity used for training voxelmorph')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -138,7 +141,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                                        betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_RigidReg)
 
-            self.criterionDefReg = networks.NCCLoss()
+            self.criterionDefReg = getattr(sys.modules['models.networks'], opt.similarity + 'Loss')()
             self.criterionDefRgl = networks.GradLoss('l2', loss_mult=opt.int_downsize)
             self.optimizer_DefReg = torch.optim.Adam(self.netDefReg.parameters(), lr=opt.lr_Def)
             self.optimizers.append(self.optimizer_DefReg)
@@ -148,7 +151,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
 
-        self.first_phase_coeff = 1
+        self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
 
     def get_model(self, name):
         if name == "RigidReg":
@@ -384,7 +387,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
         self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
 
-        seg_fake_B = self.netSeg(self.fake_B)
+        seg_fake_B = self.netSeg(self.fake_B.detach())
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
@@ -426,7 +429,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.set_requires_grad(self.netSeg, True)
             self.optimizer_DefReg.zero_grad()
             self.optimizer_Seg.zero_grad()
-            self.bacward_DefReg_Seg()
+            self.bacward_DefReg_Seg()  # only back propagate through fake_B once
             self.optimizer_DefReg.step()
             self.optimizer_Seg.step()
 
