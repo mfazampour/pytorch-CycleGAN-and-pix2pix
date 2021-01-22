@@ -1564,3 +1564,18 @@ class NCCLoss(nn.Module):
     def forward(self, y_true, y_pred):
         return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred)
 
+
+##########################################################################
+## MIND loss nn module using voxelmorph MIND
+##
+##########################################################################
+
+class MINDLoss(nn.Module):
+    def __init__(self, win=None):
+        super().__init__()
+        self.win = win
+        self.loss_fn = vxm.losses.MIND()
+
+    def forward(self, y_true, y_pred):
+        return self.loss_fn.loss(y_true=y_true, y_pred=y_pred)
+

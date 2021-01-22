@@ -41,7 +41,7 @@ if __name__ == '__main__':
     opt.visualizer = visualizer
     total_iters = 0  # the total number of training iterations
 
-    optimize_time = 0.1
+    optimize_time = -1
 
     times = []
     opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
@@ -78,7 +78,8 @@ if __name__ == '__main__':
 
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
-            optimize_time = (time.time() - optimize_start_time) / batch_size * 0.005 + 0.995 * optimize_time
+            new_time = (time.time() - optimize_start_time) / batch_size
+            optimize_time = new_time * 0.5 if optimize_time == -1 else new_time * 0.02 + 0.98 * optimize_time
 
             model.save_smallest_network()
             if total_iters % opt.print_freq == 0:  # print training losses and save logging information to the disk

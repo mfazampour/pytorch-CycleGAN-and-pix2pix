@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from collections import OrderedDict
 from typing import Tuple
 import util.util as util
@@ -39,7 +40,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
-        parser.add_argument('--epochs_before_reg', type=int, default=15,
+        parser.add_argument('--epochs_before_reg', type=int, default=0,
                             help='number of epochs to train the network before reg loss is used')
         parser.add_argument('--cudnn-nondet', action='store_true',
                             help='disable cudnn determinism - might slow down training')
@@ -91,6 +92,10 @@ class CUT3DMultiTaskModel(CUT3dModel):
             parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--vxm_iteration_steps', type=int, default=1,
+                                help='number of steps to train the registration network for each simulated US')
+            parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
+                                help='type of the similarity used for training voxelmorph')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -136,7 +141,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                                        betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_RigidReg)
 
-            self.criterionDefReg = networks.NCCLoss()
+            self.criterionDefReg = getattr(sys.modules['models.networks'], opt.similarity + 'Loss')()
             self.criterionDefRgl = networks.GradLoss('l2', loss_mult=opt.int_downsize)
             self.optimizer_DefReg = torch.optim.Adam(self.netDefReg.parameters(), lr=opt.lr_Def)
             self.optimizers.append(self.optimizer_DefReg)
@@ -146,7 +151,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
 
-        self.first_phase_coeff = 1
+        self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
 
     def get_model(self, name):
         if name == "RigidReg":
@@ -419,13 +424,14 @@ class CUT3DMultiTaskModel(CUT3dModel):
         # update deformable registration and segmentation network
         if (1 - self.first_phase_coeff) == 0:
             return
-        self.set_requires_grad(self.netDefReg, True)
-        self.set_requires_grad(self.netSeg, True)
-        self.optimizer_DefReg.zero_grad()
-        self.optimizer_Seg.zero_grad()
-        self.bacward_DefReg_Seg()
-        self.optimizer_DefReg.step()
-        self.optimizer_Seg.step()
+        for _ in range(self.opt.vxm_iteration_steps):
+            self.set_requires_grad(self.netDefReg, True)
+            self.set_requires_grad(self.netSeg, True)
+            self.optimizer_DefReg.zero_grad()
+            self.optimizer_Seg.zero_grad()
+            self.bacward_DefReg_Seg()  # only back propagate through fake_B once
+            self.optimizer_DefReg.step()
+            self.optimizer_Seg.step()
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
@@ -517,49 +523,75 @@ class CUT3DMultiTaskModel(CUT3dModel):
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
         super(CUT3DMultiTaskModel, self).log_tensorboard(writer=writer, losses=losses, global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
-        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
-        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff Orig')
-        vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
-        writer.add_figure(tag='Rigid', figure=fig, global_step=global_step)
+        self.add_rigid_figures(global_step, writer)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 5)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask A')
-        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg Fake')
-        vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[2, :], img_name='Seg B')
-        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
-        overlay *= 0.8
-        overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Def mask overlay', cmap=None)
-        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
-        overlay *= 0.8
-        overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Seg overlay', cmap=None)
-        writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
+        self.add_segmentation_figures(global_step, writer)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 6)
+        self.add_deformable_figures(global_step, writer)
+
+        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
+
+    def add_deformable_figures(self, global_step, writer):
+        axs, fig = vxm.torch.utils.init_figure(3, 8)
         vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, ...], img_name='Def. X', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, ...], img_name='Def. Y', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, ...], img_name='Def. Z', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
         vxm.torch.utils.fill_subplots(self.deformed_A.detach().cpu(), axs=axs[3, :], img_name='Deformed')
+        vxm.torch.utils.fill_subplots((self.deformed_A.detach() - self.real_A).abs().cpu(),
+                                      axs=axs[4, :], img_name='Deformed - moving')
+        overlay = self.real_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay *= 0.8
+        overlay[:, 0:1, ...] += (0.5 * self.real_B.detach() + 0.5) * 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Moving overlay', cmap=None)
         overlay = self.deformed_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay *= 0.8
         overlay[:, 0:1, ...] += (0.5 * self.real_B.detach() + 0.5) * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Deformed overlay', cmap=None)
         overlay = self.mask_A.repeat(1, 3, 1, 1, 1)
         overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
         overlay[:, 2, ...] = 0
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Def. mask overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
         writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
 
-        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
+    def add_rigid_figures(self, global_step, writer):
+        axs, fig = vxm.torch.utils.init_figure(3, 4)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
+        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
+        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff orig')
+        vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
+        writer.add_figure(tag='Rigid', figure=fig, global_step=global_step)
+
+    def add_segmentation_figures(self, global_step, writer):
+        axs, fig = vxm.torch.utils.init_figure(3, 7)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
+        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg fake US')
+
+        overlay = self.fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.seg_fake_B.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Fake mask overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[3, :], img_name='Deformed mask')
+
+        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. mask overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[5, :], img_name='Seg. US')
+
+        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
+
+        writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
