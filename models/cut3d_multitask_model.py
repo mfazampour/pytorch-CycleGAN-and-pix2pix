@@ -91,6 +91,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
             parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
+            parser.add_argument('--vxm_iteration_steps', type=int, default=1,
+                                help='number of steps to train the registration network for each simulated US')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -382,7 +384,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
         self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
 
-        seg_fake_B = self.netSeg(self.fake_B.detach())
+        seg_fake_B = self.netSeg(self.fake_B)
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
@@ -419,13 +421,14 @@ class CUT3DMultiTaskModel(CUT3dModel):
         # update deformable registration and segmentation network
         if (1 - self.first_phase_coeff) == 0:
             return
-        self.set_requires_grad(self.netDefReg, True)
-        self.set_requires_grad(self.netSeg, True)
-        self.optimizer_DefReg.zero_grad()
-        self.optimizer_Seg.zero_grad()
-        self.bacward_DefReg_Seg()
-        self.optimizer_DefReg.step()
-        self.optimizer_Seg.step()
+        for _ in range(self.opt.vxm_iteration_steps):
+            self.set_requires_grad(self.netDefReg, True)
+            self.set_requires_grad(self.netSeg, True)
+            self.optimizer_DefReg.zero_grad()
+            self.optimizer_Seg.zero_grad()
+            self.bacward_DefReg_Seg()
+            self.optimizer_DefReg.step()
+            self.optimizer_Seg.step()
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
