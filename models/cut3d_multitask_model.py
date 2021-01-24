@@ -18,6 +18,7 @@ from .cut3d_model import CUT3dModel
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
+from monai.metrics import compute_meandice
 
 class CUT3DMultiTaskModel(CUT3dModel):
 
@@ -285,11 +286,18 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
 
+        if 'B_mask' in input.keys():
+            self.mask_B = input['B_mask'].to(self.device).type(self.real_A.dtype)
+        else:
+            self.mask_B = None
+
         ###
+        self.init_loss_tensors()
+
+    def init_loss_tensors(self):
         self.loss_DefReg_real = torch.tensor([0.0])
         self.loss_DefReg = torch.tensor([0.0])
         self.loss_DefReg_fake = torch.tensor([0.0])
-
         self.loss_DefReg_fake = torch.tensor([0.0])
         self.loss_DefRgl = torch.tensor([0.0])
         self.loss_Seg_real = torch.tensor([0.0])
@@ -531,8 +539,22 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
 
+        if self.mask_B is not None:
+            # calculate dice
+            shape = list(self.mask_A_deformed.shape)
+            n = 2  # number of classes # TODO set it as an argument passed to through opts
+            shape[1] = n
+            one_hot_fixed = torch.zeros(shape, device=self.device)
+            one_hot_deformed = torch.zeros(shape, device=self.device)
+            for i in range(n):
+                one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
+                one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
+            dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+            writer.add_scalar('losses/dice', scalar_value=dice, global_step=global_step)
+
     def add_deformable_figures(self, global_step, writer):
-        axs, fig = vxm.torch.utils.init_figure(3, 8)
+        n = 8 if self.mask_B is None else 9
+        axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
@@ -557,6 +579,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
         overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
         overlay[:, 2, ...] = 0
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
+        if self.mask_B is not None:
+            overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
+            overlay[:, 2, ...] = 0
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask MR-US overlay', cmap=None)
         writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
 
     def add_rigid_figures(self, global_step, writer):

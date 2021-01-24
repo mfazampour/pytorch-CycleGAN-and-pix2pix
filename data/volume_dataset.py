@@ -70,6 +70,7 @@ class VolumeDataset(BaseDataset):
         BaseDataset.__init__(self, opt)
         self.opt = opt
 
+        self.to_validate = to_validate
         if to_validate:
             self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
         else:
@@ -173,6 +174,8 @@ class VolumeDataset(BaseDataset):
         }
         if self.load_mask:
             dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
+            if 'trus_tree' in transformed_.keys():
+                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
 
         return dict_
 
@@ -183,9 +186,15 @@ class VolumeDataset(BaseDataset):
         if sample not in self.subjects:
             # print(f'loading patient {sample}')
             if self.load_mask:
-                subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                          trus=torchio.ScalarImage(sample + "/trus.mhd"),
-                                          mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
+                if os.path.isfile(sample + "/trus_tree.mhd"):
+                    subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"),
+                                              trus_tree=torchio.LabelMap(sample + "/trus_tree.mhd"))
+                else:
+                    subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
             else:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
                                           trus=torchio.Image(sample + "/trus.mhd"))
