@@ -164,6 +164,7 @@ class CUT3dModel(BaseModel):
         """
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
+        print(f"size of A {self.real_A.size}")
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.landmarks_A = input['A_landmark'].to(self.device)
         self.landmarks_B = input['B_landmark'].to(self.device)

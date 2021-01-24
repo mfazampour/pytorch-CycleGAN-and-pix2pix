@@ -34,10 +34,8 @@ class BaseOptions():
         parser.add_argument('--input_nc', type=int, default=3, help='# of input image channels: 3 for RGB and 1 for grayscale')
         parser.add_argument('--output_nc', type=int, default=3, help='# of output image channels: 3 for RGB and 1 for grayscale')
         parser.add_argument('--ngf', type=int, default=64, help='# of gen filters in the last conv layer')
-        parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in the first conv layer')
         parser.add_argument('--netD', type=str, default='basic', choices=['basic', 'n_layers', 'pixel', 'patch', 'tilestylegan2', 'stylegan2'], help='specify discriminator architecture. The basic model is a 70x70 PatchGAN. n_layers allows you to specify the layers in the discriminator')
-        parser.add_argument('--netG', type=str, default='resnet_4blocks', choices=['resnet_9blocks', 'resnet_4blocks', 'unet_3D','resnet_6blocks', 'unet_256', 'unet_128', 'unet_small', 'stylegan2', 'smallstylegan2', 'resnet_cat'], help='specify generator architecture')
-        parser.add_argument('--n_layers_D', type=int, default=3, help='only used if netD==n_layers')
+        parser.add_argument('--netG', type=str, default='resnet_4blocks', choices=['global','local','encoder','resnet_9blocks', 'resnet_4blocks', 'unet_3D','resnet_6blocks', 'unet_256', 'unet_128', 'unet_small', 'stylegan2', 'smallstylegan2', 'resnet_cat'], help='specify generator architecture')
         parser.add_argument('--normG', type=str, default='instance', choices=['instance', 'batch', 'none'], help='instance normalization or batch normalization for G')
         parser.add_argument('--normD', type=str, default='instance', choices=['instance', 'batch', 'none'], help='instance normalization or batch normalization for D')
         parser.add_argument('--init_type', type=str, default='xavier', choices=['normal', 'xavier', 'kaiming', 'orthogonal'], help='network initialization')
@@ -53,7 +51,7 @@ class BaseOptions():
         parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
         parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
         parser.add_argument('--load_size', type=int, default=286, help='scale images to this size')
-        parser.add_argument('--crop_size', type=int, default=256, help='then crop to this size')
+        parser.add_argument('--crop_size', type=int, default=200, help='then crop to this size')
         parser.add_argument('--max_dataset_size', type=int, default=float("inf"), help='Maximum number of samples allowed per dataset. If the dataset directory contains more than max_dataset_size, only a subset is loaded.')
         parser.add_argument('--preprocess', type=str, default='resize_and_crop', help='scaling and cropping of images at load time [resize_and_crop | crop | scale_width | scale_width_and_crop | none]')
         parser.add_argument('--no_flip', action='store_true', help='if specified, do not flip the images for data augmentation')
@@ -68,6 +66,43 @@ class BaseOptions():
         parser.add_argument('--val_fold', default='validation/', type=str, help='Validation folder name')
         parser.add_argument('--train_fold', default='train/', type=str, help='Train folder name')
         parser.add_argument('--test_fold', default='test/', type=str, help='Test folder name')
+
+        # from pix2pix HD
+        parser.add_argument('--norm', type=str, default='instance', help='instance normalization or batch normalization')
+        parser.add_argument('--ntest', type=int, default=float("inf"), help='# of test examples.')
+        parser.add_argument('--results_dir', type=str, default='./results/', help='saves results here.')
+        parser.add_argument('--aspect_ratio', type=float, default=1.0, help='aspect ratio of result images')
+        parser.add_argument('--which_epoch', type=str, default='latest', help='which epoch to load? set to latest to use latest cached model')
+        parser.add_argument('--how_many', type=int, default=50, help='how many test images to run')
+        parser.add_argument('--cluster_path', type=str, default='features_clustered_010.npy', help='the path for clustered results of encoded features')
+        parser.add_argument('--use_encoded_image', action='store_true', help='if specified, encode the real image to get the feature map')
+        parser.add_argument("--export_onnx", type=str, help="export ONNX model to a given file")
+        parser.add_argument("--engine", type=str, help="run serialized TRT engine")
+        parser.add_argument("--onnx", type=str, help="run ONNX model via TRT")
+        parser.add_argument('--label_nc', type=int, default=35, help='# of input label channels')
+        parser.add_argument('--no_instance', action='store_true', help='if specified, do *not* add instance map as input')
+            # for instance-wise features
+        parser.add_argument('--instance_feat', action='store_true',
+                                 help='if specified, add encoded instance features as input')
+        parser.add_argument('--label_feat', action='store_true',
+                                 help='if specified, add encoded label features as input')
+        parser.add_argument('--feat_num', type=int, default=3, help='vector length for encoded features')
+        parser.add_argument('--load_features', action='store_true',
+                                 help='if specified, load precomputed feature maps')
+        parser.add_argument('--n_downsample_E', type=int, default=4, help='# of downsampling layers in encoder')
+        parser.add_argument('--nef', type=int, default=16, help='# of encoder filters in the first conv layer')
+        parser.add_argument('--n_clusters', type=int, default=10, help='number of clusters for features')
+            # for generator
+        parser.add_argument('--n_downsample_global', type=int, default=4,
+                                 help='number of downsampling layers in netG')
+        parser.add_argument('--n_blocks_global', type=int, default=9,
+                                 help='number of residual blocks in the global generator network')
+        parser.add_argument('--n_blocks_local', type=int, default=3,
+                                 help='number of residual blocks in the local enhancer network')
+        parser.add_argument('--n_local_enhancers', type=int, default=1, help='number of local enhancers to use')
+        parser.add_argument('--niter_fix_global', type=int, default=0,
+                                 help='number of epochs that we only train the outmost local enhancer')
+
 
         # parameters related to StyleGAN2-based networks
         parser.add_argument('--stylegan2_G_num_downsampling',

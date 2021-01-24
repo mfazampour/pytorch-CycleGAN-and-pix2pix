@@ -71,9 +71,9 @@ class VolumeDataset(BaseDataset):
         self.opt = opt
 
         if to_validate:
-            self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
+            self.root = self.opt.dataroot + self.opt.val_fold
         else:
-            self.root = os.path.join(self.opt.dataroot, self.opt.train_fold)
+            self.root = self.opt.dataroot + self.opt.train_fold
 
         print(f'dataroot: {self.root}')
         self.load_mask = opt.load_mask
@@ -127,8 +127,8 @@ class VolumeDataset(BaseDataset):
         #     )
         #     transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
 
-        self.ratio = self.min_size / np.max(self.input_size)
-        transforms.append(Resample(self.ratio))
+       # self.ratio = self.min_size / np.max(self.input_size)
+        #transforms.append(Resample(self.ratio))
         transforms.append(CropOrPad(self.input_size))
         transform = Compose(transforms)
         return transform
@@ -151,9 +151,7 @@ class VolumeDataset(BaseDataset):
         sample, subject = self.load_subject_(index)
         landmarks_a = create_landmarks.getLandmarks(sample + "/mr.mhd", sample[:-8] + "/mr_pcd.txt")
         landmarks_b = create_landmarks.getLandmarks(sample + "/trus.mhd", sample[:-8] + "/trus_pcd.txt")
-
         transformed_ = self.transform(subject)
-
         if self.opt.visualize_volume:
             try:
                 with napari.gui_qt():

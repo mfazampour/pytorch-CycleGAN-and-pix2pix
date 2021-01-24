@@ -2,7 +2,7 @@ import os
 import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
-from . import networks
+from models import networks
 
 #
 class BaseModel(ABC):
@@ -43,6 +43,8 @@ class BaseModel(ABC):
         self.image_paths = []
         self.metric = 0  # used for learning rate policy 'plateau'
         self.min_Ganloss = 1000.0
+        self.Tensor = torch.cuda.FloatTensor if self.gpu_ids else torch.Tensor
+
 
     @staticmethod
     def dict_grad_hook_factory(add_func=lambda x: x):
@@ -122,7 +124,8 @@ class BaseModel(ABC):
         for name in self.model_names:
             if isinstance(name, str):
                 net = getattr(self, 'net' + name)
-                net.train()
+                if name != "G" and name != "D":
+                    net.train()
 
     def test(self):
         """Forward function used in test time.

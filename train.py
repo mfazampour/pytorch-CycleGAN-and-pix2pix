@@ -29,6 +29,7 @@ if __name__ == '__main__':
     except Exception as e:
         print(e)
         print("You are Running on the local Machine")
+        opt.dataroot = opt.dataroot
 
     dataset = create_dataset(opt, to_validate=False)  # create a dataset given opt.dataset_mode and other options
     dataset_val = create_dataset(opt, to_validate=True)  # validation dataset
