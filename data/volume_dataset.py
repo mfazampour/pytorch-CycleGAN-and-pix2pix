@@ -59,6 +59,8 @@ class VolumeDataset(BaseDataset):
         parser.add_argument('--origshape', type=int, nargs='+', default=[80] * 3,
                             help='original shape of input images')
         parser.add_argument('--min_size', type=int, default=80, help='minimum length of the axes')
+        parser.add_argument('--transforms', nargs='+', default=[],
+                            help='list of possible augmentations, currently [flip, affine]')
         return parser
 
     def __init__(self, opt, to_validate=False):
@@ -118,6 +120,12 @@ class VolumeDataset(BaseDataset):
         transforms.append(rescale)
 
         # transforms = [rescale]
+        if 'affine' in self.opt.transforms:
+            transforms.append(RandomAffine(translation=5, p=0.8))
+
+        if 'flip' in self.opt.transforms:
+            transforms.append(RandomFlip(axes=(0, 2), p=0.8))
+
         # # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
         # # Also, there is a 25% chance that none of them will be applied
@@ -173,10 +181,13 @@ class VolumeDataset(BaseDataset):
             'B_landmark': landmarks_b,
         }
         if self.load_mask:
-            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
+            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
             if 'trus_tree' in transformed_.keys():
-                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
-
+                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
+                dict_['B_mask_available'] = True
+            else:
+                dict_['B_mask'] = torch.zeros_like(dict_['A_mask'])
+                dict_['B_mask_available'] = False
         return dict_
 
     def load_subject_(self, index):

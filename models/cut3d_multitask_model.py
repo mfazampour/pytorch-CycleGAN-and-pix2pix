@@ -286,7 +286,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
 
-        if 'B_mask' in input.keys():
+        if input['B_mask_available'][0]:  # TODO in this way it only works with batch size 1
             self.mask_B = input['B_mask'].to(self.device).type(self.real_A.dtype)
         else:
             self.mask_B = None

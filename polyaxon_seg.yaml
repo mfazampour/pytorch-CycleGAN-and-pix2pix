@@ -5,7 +5,7 @@ kind: experiment
 
 framework: pytorch
 
-tags: [Mutltitask, HPTuning]
+tags: [MR_Segmentation]
 
 
 
@@ -27,53 +27,58 @@ environment:
     gpu:
       requests: 1
       limits: 1
+  node_selector:
+    nvidiaDriver: "450"
 
 params:
-  n_epochs: 100
   dataroot: "/Prostate_Reg_KM/anonymized"
-  name: "pix2pix3d_seg"
-  model: "pix2pix3d_seg"
-  netG: "unet_128"
   dataset_mode: "volume"
+  name: "unet_seg"
+  model: "segmentation"
+  netSeg: "unet_small"
   input_nc: 1
   output_nc: 1
   lr_policy: "linear"
-  display_freq: 20
+  display_freq: 50
   lr_decay_iters: 1
-  batch_size: 3
+  batch_size: 40
   display_server: http://0.0.0.0
-  lambda_L1: 0.1
-  print_freq: 10
-  lr: 0.00002
+  n_epochs: 25
+  n_epochs_decay: 25
+  print_freq: 20
+  lr: 0.0002
   load_mask: true
   gpu_ids: 0
   num_threads: 3
-  lambda_Seg: 100
   display_ncols: 3
+  val_fold: "validation/"
+  train_fold: "train/"
+
 
 run:
     cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
                                     --n_epochs={{ n_epochs }} \
+                                    --n_epochs_decay {{ n_epochs_decay }} \
                                     --model={{ model }} \
                                     --dataroot={{ dataroot }} \
                                     --name={{ name }} \
-                                    --model={{ model }} \
                                     --input_nc={{ input_nc }} \
                                     --output_nc={{ output_nc }} \
-                                    --netG={{ netG }} \
+                                    --netSeg={{ netSeg }} \
                                     --dataset_mode={{ dataset_mode }} \
                                     --lr_policy={{ lr_policy }} \
                                     --display_freq={{ display_freq }} \
                                     --lr_decay_iters={{ lr_decay_iters }} \
-                                    --batch_size={{ batch_size }} \
                                     --display_server={{ display_server }} \
-                                    --lambda_L1={{ lambda_L1 }} \
                                     --print_freq={{ print_freq }} \
                                     --lr={{ lr }} \
                                     --load_mask={{ load_mask }} \
                                     --gpu_ids={{ gpu_ids }} \
                                     --num_threads={{ num_threads }} \
-                                    --lambda_Seg={{ lambda_Seg }} \
                                     --display_ncols={{ display_ncols }} \
-                                    --display_id -1
+                                    --display_id -1 \
+                                    --val_fold={{ val_fold }} \
+                                    --train_fold={{ train_fold }} \
+                                    --transforms flip affine \
+                                    --inshape 80 80 80
 
