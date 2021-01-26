@@ -68,6 +68,7 @@ class BaseOptions():
         parser.add_argument('--test_fold', default='test/', type=str, help='Test folder name')
 
         # from pix2pix HD
+        parser.add_argument('--data_type', default=32, type=int, choices=[8, 16, 32], help="Supported data type i.e. 8, 16, 32 bit")
         parser.add_argument('--norm', type=str, default='instance', help='instance normalization or batch normalization')
         parser.add_argument('--ntest', type=int, default=float("inf"), help='# of test examples.')
         parser.add_argument('--results_dir', type=str, default='./results/', help='saves results here.')

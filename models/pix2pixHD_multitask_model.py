@@ -3,21 +3,21 @@ import os
 from collections import OrderedDict
 from typing import Tuple
 import util.util as util
-from models.patchnce import PatchNCELoss
+from util.image_pool import ImagePool
+from util import affine_transform
+from util import distance_landmarks
 from models.base_model import BaseModel
 from torch.autograd import Variable
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import sys
-from util import affine_transform
-from util import distance_landmarks
 from models import networks
 from models import networks3d
 #from .cut3d_model import CUT3dModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
-sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
+#sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
 from voxelmorph import voxelmorph as vxm
 
 
@@ -129,10 +129,10 @@ class pix2pixHDMultitaskModel(BaseModel):
         # HD
         self.input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc
         # Generator network
-        self.netG_input_nc = self.input_nc
+        self.netG_input_nc = 1
         if self.isTrain:
             self.use_sigmoid = opt.no_lsgan
-            self.netD_input_nc = self.input_nc + opt.output_nc
+            self.netD_input_nc = self.netG_input_nc + 1
             if not opt.no_instance:
                 self.netD_input_nc += 1
 
@@ -164,7 +164,6 @@ class pix2pixHDMultitaskModel(BaseModel):
 
             # pix2pixHD optimizers
             # optimizer G
-
             params = list(self.netG.parameters())
             if self.gen_features:
                 params += list(self.netE.parameters())
@@ -175,6 +174,10 @@ class pix2pixHDMultitaskModel(BaseModel):
             self.optimizer_D = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
 
             # pix2pixHD
+            if opt.pool_size > 0 and (len(self.gpu_ids)) > 1:
+                raise NotImplementedError("Fake Pool Not Implemented for MultiGPU")
+            self.fake_pool = ImagePool(opt.pool_size)
+            self.old_lr = opt.lr
             self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss)
             self.criterionGAN = networks3d.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
             self.criterionFeat = torch.nn.L1Loss()
@@ -196,7 +199,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         else:
             # create one-hot vector for label map
             size = label_map.size()
-            oneHot_size = (size[0], self.opt.label_nc, size[2], size[3])
+            oneHot_size = (size[0], self.opt.label_nc, size[2], size[3],size[4])
             input_label = torch.cuda.FloatTensor(torch.Size(oneHot_size)).zero_()
             input_label = input_label.scatter_(1, label_map.data.long().cuda(), 1.0)
             if self.opt.data_type == 16:
@@ -207,11 +210,11 @@ class pix2pixHDMultitaskModel(BaseModel):
             inst_map = inst_map.data.cuda()
             edge_map = self.get_edges(inst_map)
             input_label = torch.cat((input_label, edge_map), dim=1)
-        input_label = Variable(input_label, volatile=infer)
+        input_label = input_label
 
         # real images for training
         if real_image is not None:
-            real_image = Variable(real_image.data.cuda())
+            real_image = real_image
 
         # instance map for feature encoding
         if self.use_features:
@@ -306,17 +309,17 @@ class pix2pixHDMultitaskModel(BaseModel):
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
         # Names so we can breakout loss
-        self.loss_pix2pix = ['G_GAN', 'G_GAN_Feat', 'G_VGG', 'D_real', 'D_fake']
-        self.loss_names = [ 'RigidReg_fake', 'RigidReg_real']
+        self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'G_VGG', 'D_real', 'D_fake']
+        self.loss_names = [ 'G','RigidReg_fake', 'RigidReg_real']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
         if self.opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
 
-        self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
-        self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
-        self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
+        #self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
+       # self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
+       # self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
 
         # rigid registration
         self.visual_names += ['diff_A_center_sag', 'diff_A_center_cor', 'diff_A_center_axi']
@@ -366,7 +369,6 @@ class pix2pixHDMultitaskModel(BaseModel):
             affine_transform.show_volumes([self.real_B, self.transformed_B])
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
-
         ###
         self.loss_DefReg_real = torch.tensor([0.0])
         self.loss_DefReg = torch.tensor([0.0])
@@ -409,16 +411,18 @@ class pix2pixHDMultitaskModel(BaseModel):
 
         #pix2pixHD
         # Encode Inputs
-        input_label, inst_map, real_image, feat_map = self.encode_input(label_map=self.mask_A, inst_map=None, real_image=self.real_A, feat_map=None)
+       # self.input_label, inst_map, real_image, feat_map = self.encode_input(label_map=self.mask_A, inst_map=None, real_image=self.real_B, feat_map=None)
 
         # Fake Generation
-        if self.use_features:
-            if not self.opt.load_features:
-                feat_map = self.netE.forward(real_image, inst_map)
-            self.input_concat = torch.cat((input_label, feat_map), dim=1)
-        else:
-            self.input_concat = input_label
-        self.fake_image = self.netG.forward(self.input_concat)
+      #  if self.use_features:
+       #     if not self.opt.load_features:
+       #         feat_map = self.netE.forward(real_image, inst_map)
+       #     self.input_concat = torch.cat((self.input_label, feat_map), dim=1)
+       # else:
+       #     self.input_concat = torch.tensor(self.input_label)
+
+        #print(f"Concat size: {self.input_concat.shape}")
+        self.fake_B = self.netG.forward(self.mask_A)
 
 
 
@@ -447,15 +451,15 @@ class pix2pixHDMultitaskModel(BaseModel):
         ########   pix2pix HD    ########
         # Fake Detection and Loss
 
-        pred_fake_pool = self.discriminate(self.input_label, self.fake_image, use_pool=True)
+        pred_fake_pool = self.discriminate(self.mask_A, self.fake_B, use_pool=True)
         self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
 
         # Real Detection and Loss
-        pred_real = self.discriminate(self.input_label, self.real_A)
+        pred_real = self.discriminate(self.mask_A, self.real_A)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
         # GAN loss (Fake Passability Loss)
-        pred_fake = self.netD.forward(torch.cat((self.input_label, self.fake_image), dim=1))
+        pred_fake = self.netD.forward(torch.cat((self.mask_A, self.fake_B), dim=1))
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
         # GAN feature matching loss
@@ -468,13 +472,13 @@ class pix2pixHDMultitaskModel(BaseModel):
                     self.loss_G_GAN_Feat += D_weights * feat_weights * \
                                        self.criterionFeat(pred_fake[i][j],
                                                           pred_real[i][j].detach()) * self.opt.lambda_feat
-
+        self.loss_G_VGG = torch.tensor(0.00)
         # VGG feature matching loss
         if not self.opt.no_vgg_loss:
-            self.loss_G_VGG = self.criterionVGG(self.fake_image, self.real_image) * self.opt.lambda_feat
+            self.loss_G_VGG = self.criterionVGG(self.fake_B, self.real_B) * self.opt.lambda_feat
         losses = self.loss_filter( self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_G_VGG, self.loss_D_real, self.loss_D_fake )
-        losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
-        self.loss_dict = dict(zip(self.loss_pix2pix, losses))
+        self.losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
+        self.loss_dict = dict(zip(self.losses_pix2pix, self.losses))
         self.loss_pix2pix = self.loss_dict['G_GAN'] + self.loss_dict.get('G_GAN_Feat',0) + self.loss_dict.get('G_VGG',0)
 
         ########   END pix2pix HD    ########
@@ -507,10 +511,10 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.loss_G.backward()
 
     def backward_D(self):
-        loss_D = (self.loss_dict['D_fake'] + self.loss_dict['D_real']) * 0.5
+        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
 
 
-
+#
     def backward_RigidReg(self):
         """
         Calculate Segmentation loss to update the segmentation networks
@@ -561,11 +565,11 @@ class pix2pixHDMultitaskModel(BaseModel):
     def optimize_parameters(self):
         self.forward()  # compute fake images: G(A), rigid registration params, DVF and segmentation mask
         # update D
-        self.set_requires_grad(self.netD, True)  # enable backprop for D
-        self.optimizer_D.zero_grad()  # set D's gradients to zero
-        self.loss_D = super().compute_D_loss()
-        self.loss_D.backward()
-        self.optimizer_D.step()  # update D's weights
+    #    self.set_requires_grad(self.netD, True)  # enable backprop for D
+    #    self.optimizer_D.zero_grad()  # set D's gradients to zero
+    #    self.loss_D = super().compute_D_loss()
+    #    self.loss_D.backward()
+    #    self.optimizer_D.step()  # update D's weights
 
         # update G
         #self.set_requires_grad(self.netD, False)  # D requires no gradients when optimizing G

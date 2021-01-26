@@ -4,7 +4,7 @@
 ###############################################################################
 
 from collections import OrderedDict
-
+from torch.autograd import Variable
 import functools
 import numpy as np
 import torch
@@ -325,7 +325,7 @@ class MultiscaleDiscriminator(nn.Module):
             else:
                 setattr(self, 'layer' + str(i), netD.model)
 
-        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.downsample = nn.AvgPool3d(3, stride=2, padding=1, count_include_pad=False)
 
     def singleD_forward(self, model, input):
         if self.getIntermFeat:
@@ -484,7 +484,7 @@ class LocalEnhancer(nn.Module):
             setattr(self, 'model' + str(n) + '_1', nn.Sequential(*model_downsample))
             setattr(self, 'model' + str(n) + '_2', nn.Sequential(*model_upsample))
 
-        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.downsample = nn.AvgPool3d(3, stride=2, padding=1, count_include_pad=False)
 
     def forward(self, input):
         ### create input pyramid
@@ -960,7 +960,7 @@ class ResnetBlock3d(nn.Module):
 
         p = 0
         if padding_type == 'reflect':
-            conv_block += [nn.ReplicationPad3d(1)]
+            conv_block += [nn.ReplicationPad3d(0)]
         elif padding_type == 'replicate':
             conv_block += [nn.ReplicationPad3d(1)]
         elif padding_type == 'zero':
@@ -973,8 +973,6 @@ class ResnetBlock3d(nn.Module):
 
     def forward(self, x):
         """Forward function (with skip connections)"""
-        print(x.shape)
-        print(self.conv_block(x).shape)
         out = x + self.conv_block(x)  # add skip connections
         return out
 

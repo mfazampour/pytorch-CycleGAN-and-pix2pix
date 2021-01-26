@@ -23,6 +23,7 @@ if __name__ == '__main__':
         base_path = get_data_paths()
         print("You are running on the cluster :)")
         opt.dataroot = base_path['data1'] + opt.dataroot
+        print(opt.dataroot )
         opt.checkpoints_dir = get_outputs_path()
         opt.display_id = -1  # no visdom available on the cluster
         parser.print_options(opt)

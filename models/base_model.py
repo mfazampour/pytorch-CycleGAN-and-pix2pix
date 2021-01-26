@@ -230,39 +230,40 @@ class BaseModel(ABC):
             epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
         """
         for name in self.model_names:
-            if isinstance(name, str):
-                load_filename = '%s_net_%s.pth' % (epoch, name)
-                if self.opt.isTrain and self.opt.pretrained_name is not None:
-                        self.join = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
-                        load_dir = self.join
-                else:
-                    load_dir = self.opt.load_init_models
+            if name not in ['G','D','E']:
+                if isinstance(name, str):
+                    load_filename = '%s_net_%s.pth' % (epoch, name)
+                    if self.opt.isTrain and self.opt.pretrained_name is not None:
+                            self.join = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
+                            load_dir = self.join
+                    else:
+                        load_dir = self.opt.load_init_models
 
-                load_path = os.path.join(load_dir, load_filename)
-                net = getattr(self, 'net' + name)
-                if isinstance(net, torch.nn.DataParallel):
-                    net = net.module
-                print('loading the model from %s' % load_path)
+                    load_path = os.path.join(load_dir, load_filename)
+                    net = getattr(self, 'net' + name)
+                    if isinstance(net, torch.nn.DataParallel):
+                        net = net.module
+                    print('loading the model from %s' % load_path)
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
-                state_dict = torch.load(load_path, map_location=str(self.device))
-                if hasattr(state_dict, '_metadata'):
-                    del state_dict._metadata
+                    state_dict = torch.load(load_path, map_location=str(self.device))
+                    if hasattr(state_dict, '_metadata'):
+                        del state_dict._metadata
 
                 # patch InstanceNorm checkpoints prior to 0.4
                 # for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
                 #    self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
-                print(f"name {name}")
-                model = self.get_model(name)
-                pre_params = state_dict
-                new_params = model.state_dict()
+                    print(f"name {name}")
+                    model = self.get_model(name)
+                    pre_params = state_dict
+                    new_params = model.state_dict()
 
-                for key in new_params:
-                    if key in pre_params:
-                        if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
-                            new_params[key] = pre_params[key]
+                    for key in new_params:
+                        if key in pre_params:
+                            if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
+                                new_params[key] = pre_params[key]
 
-                model.load_state_dict(new_params)
+                    model.load_state_dict(new_params)
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture

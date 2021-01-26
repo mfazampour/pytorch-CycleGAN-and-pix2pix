@@ -13,7 +13,7 @@ from itertools import repeat
 
 from util import se3
 os.environ['VXM_BACKEND'] = 'pytorch'
-sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
+#sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
 from voxelmorph import voxelmorph as vxm
 
 ###############################################################################
