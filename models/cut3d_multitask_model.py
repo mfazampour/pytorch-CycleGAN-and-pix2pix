@@ -156,7 +156,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.criterionSeg = networks.DiceLoss()
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
-            self.distance_landmarks_b = 0
+            self.loss_landmarks = 0
 
         self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
 
@@ -181,6 +181,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.model_names = ['G', 'D', 'F', 'RigidReg', 'DefReg', 'Seg']
         else:  # during test time, only load G
             self.model_names = ['G', 'RigidReg', 'DefReg', 'Seg']
+
+        self.loss_functions = ['compute_D_loss', 'backward_G', 'backward_RigidReg', 'backward_DefReg_Seg']
 
         # We are using DenseNet for rigid registration -- actually DenseNet didn't provide any performance improvement
         # TODO change this to obelisk net
@@ -234,6 +236,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         # <BaseModel.get_current_losses>
         self.loss_names = ['G', 'G_NCE', 'D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
+        self.loss_names += ['dice', 'landmarks']
         if self.opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
         # specify the images you want to save/display. The training/test scripts will call
@@ -278,6 +281,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
+        self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
         self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
@@ -313,6 +317,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.loss_RigidReg_fake = torch.tensor([0.0])
         self.loss_RigidReg_real = torch.tensor([0.0])
         self.loss_RigidReg = torch.tensor([0.0])
+        self.loss_dice = None
 
     def forward(self):
         super().forward()
@@ -333,6 +338,9 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
         self.seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
+
+        self.compute_gt_dice()
+        self.compute_landmark_loss()
 
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
@@ -359,7 +367,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
         if self.opt.use_rigid_branch:
             self.loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
 
-        self.loss_G.backward()
+        if torch.is_grad_enabled():
+            self.loss_G.backward()
 
     def backward_RigidReg(self):
         """
@@ -374,9 +383,10 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                                          self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
 
         self.loss_RigidReg = self.loss_RigidReg_real + self.loss_RigidReg_fake * (1 - self.first_phase_coeff)
-        self.loss_RigidReg.backward()
+        if torch.is_grad_enabled():
+            self.loss_RigidReg.backward()
 
-    def bacward_DefReg_Seg(self):
+    def backward_DefReg_Seg(self):
         fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         fixed = fixed * 0.5 + 0.5
         def_reg_output = self.netDefReg(self.fake_B.detach() * 0.5 + 0.5, fixed)  # fake_B is the moving image here
@@ -406,14 +416,15 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
         # self.loss_DefReg.backward()
-        (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
+        if torch.is_grad_enabled():
+            (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
 
     def optimize_parameters(self):
         self.forward()  # compute fake images: G(A), rigid registration params, DVF and segmentation mask
         # update D
         self.set_requires_grad(self.netD, True)  # enable backprop for D
         self.optimizer_D.zero_grad()  # set D's gradients to zero
-        self.loss_D = super().compute_D_loss()
+        self.compute_D_loss()
         self.loss_D.backward()
         self.optimizer_D.step()  # update D's weights
 
@@ -443,9 +454,38 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.set_requires_grad(self.netSeg, True)
             self.optimizer_DefReg.zero_grad()
             self.optimizer_Seg.zero_grad()
-            self.bacward_DefReg_Seg()  # only back propagate through fake_B once
+            self.backward_DefReg_Seg()  # only back propagate through fake_B once
             self.optimizer_DefReg.step()
             self.optimizer_Seg.step()
+
+    def compute_gt_dice(self):
+        """
+        calculate the dice score between the deformed mask and the ground truth if we have it
+        Returns
+        -------
+
+        """
+        if self.mask_B is not None:
+            shape = list(self.mask_A_deformed.shape)
+            n = self.opt.num_classes  # number of classes
+            shape[1] = n
+            one_hot_fixed = torch.zeros(shape, device=self.device)
+            one_hot_deformed = torch.zeros(shape, device=self.device)
+            for i in range(n):
+                one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
+                one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
+            self.loss_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+        else:
+            self.loss_dice = None
+
+    def compute_landmark_loss(self):
+        self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
+                                                                 affine_transform.tensor_vector_to_matrix(
+                                                                     self.reg_B_params.detach()),
+                                                                 device=self.transformed_LM_B.device)
+
+        self.loss_landmarks = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
+                                                                    self.transformed_LM_B.device)
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
@@ -462,13 +502,6 @@ class CUT3DMultiTaskModel(CUT3dModel):
         super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
-        self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
-                                                                 affine_transform.tensor_vector_to_matrix(
-                                                                     self.reg_B_params.detach()),
-                                                                 device=self.transformed_LM_B.device)
-
-        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
-                                                                          self.transformed_LM_B.device)
 
         self.diff_A = reg_A - self.transformed_B
         self.diff_B = reg_B - self.transformed_B
@@ -534,31 +567,19 @@ class CUT3DMultiTaskModel(CUT3dModel):
         if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
-        super(CUT3DMultiTaskModel, self).log_tensorboard(writer=writer, losses=losses, global_step=global_step)
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
+        super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
+                                save_gif=save_gif, use_image_name=use_image_name)
 
-        self.add_rigid_figures(global_step, writer)
+        self.add_rigid_figures(global_step, writer, use_image_name=use_image_name)
 
-        self.add_segmentation_figures(global_step, writer)
+        self.add_segmentation_figures(global_step, writer, use_image_name=use_image_name)
 
-        self.add_deformable_figures(global_step, writer)
+        self.add_deformable_figures(global_step, writer, use_image_name=use_image_name)
 
-        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
 
-        if self.mask_B is not None:
-            # calculate dice
-            shape = list(self.mask_A_deformed.shape)
-            n = 2  # number of classes # TODO set it as an argument passed to through opts
-            shape[1] = n
-            one_hot_fixed = torch.zeros(shape, device=self.device)
-            one_hot_deformed = torch.zeros(shape, device=self.device)
-            for i in range(n):
-                one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
-                one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
-            dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
-            writer.add_scalar('losses/dice', scalar_value=dice, global_step=global_step)
-
-    def add_deformable_figures(self, global_step, writer):
+    def add_deformable_figures(self, global_step, writer, use_image_name=False):
         n = 8 if self.mask_B is None else 9
         axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
@@ -590,18 +611,28 @@ class CUT3DMultiTaskModel(CUT3dModel):
             overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
             overlay[:, 2, ...] = 0
             vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask MR-US overlay', cmap=None)
-        writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
 
-    def add_rigid_figures(self, global_step, writer):
+        if use_image_name:
+            tag = f'{self.patient}/Deformable'
+        else:
+            tag = 'Deformable'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+
+    def add_rigid_figures(self, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 4)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
         vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
         vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff orig')
         vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
-        writer.add_figure(tag='Rigid', figure=fig, global_step=global_step)
 
-    def add_segmentation_figures(self, global_step, writer):
+        if use_image_name:
+            tag = f'{self.patient}/Rigid'
+        else:
+            tag = 'Rigid'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+
+    def add_segmentation_figures(self, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 7)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
@@ -627,4 +658,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
         overlay[overlay > 1] = 1
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
 
-        writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
+        if use_image_name:
+            tag = f'{self.patient}/Segmentation'
+        else:
+            tag = 'Segmentation'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)

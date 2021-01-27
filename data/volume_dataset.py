@@ -63,20 +63,14 @@ class VolumeDataset(BaseDataset):
                             help='list of possible augmentations, currently [flip, affine]')
         return parser
 
-    def __init__(self, opt, to_validate=False):
+    def __init__(self, opt, mode=None):
         """Initialize this dataset class.
 
         Parameters:
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
-        BaseDataset.__init__(self, opt)
+        BaseDataset.__init__(self, opt, mode)
         self.opt = opt
-
-        self.to_validate = to_validate
-        if to_validate:
-            self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
-        else:
-            self.root = os.path.join(self.opt.dataroot, self.opt.train_fold)
 
         print(f'dataroot: {self.root}')
         self.load_mask = opt.load_mask
@@ -119,12 +113,13 @@ class VolumeDataset(BaseDataset):
 
         transforms.append(rescale)
 
-        # transforms = [rescale]
-        if 'affine' in self.opt.transforms:
-            transforms.append(RandomAffine(translation=5, p=0.8))
+        if self.mode == 'train':
+            # transforms = [rescale]
+            if 'affine' in self.opt.transforms:
+                transforms.append(RandomAffine(translation=5, p=0.8))
 
-        if 'flip' in self.opt.transforms:
-            transforms.append(RandomFlip(axes=(0, 2), p=0.8))
+            if 'flip' in self.opt.transforms:
+                transforms.append(RandomFlip(axes=(0, 2), p=0.8))
 
         # # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # # apply RandomAffine 80% of the times and RandomElasticDeformation the rest

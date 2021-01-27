@@ -2,6 +2,7 @@
 
 It also includes common transformation functions (e.g., get_transform, __scale_width), which can be later used in subclasses.
 """
+import os
 import random
 import numpy as np
 import torch.utils.data as data
@@ -20,15 +21,28 @@ class BaseDataset(data.Dataset, ABC):
     -- <modify_commandline_options>:    (optionally) add dataset-specific options and set default options.
     """
 
-    def __init__(self, opt):
+    def __init__(self, opt, mode=None):
         """Initialize the class; save the options in the class
 
         Parameters:
             opt (Option class)-- stores all the experiment flags; needs to be a subclass of BaseOptions
+            mode : can be one of None, 'train', 'validation' and 'test'
         """
         self.opt = opt
-        self.root = opt.dataroot
+
         self.current_epoch = 0
+
+        # set dataroot path based on the dataset mode
+        if mode is None:
+            self.root = opt.dataroot
+        elif mode == 'validation':
+            self.root = os.path.join(self.opt.dataroot, self.opt.val_fold)
+        elif mode == 'train':
+            self.root = os.path.join(self.opt.dataroot, self.opt.train_fold)
+        elif mode == 'test':
+            self.root = os.path.join(self.opt.dataroot, self.opt.test_fold)
+        self.mode = mode
+
 
     @staticmethod
     def modify_commandline_options(parser, is_train):

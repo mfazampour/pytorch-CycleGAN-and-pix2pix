@@ -30,8 +30,9 @@ if __name__ == '__main__':
         print(e)
         print("You are Running on the local Machine")
 
-    dataset = create_dataset(opt, to_validate=False)  # create a dataset given opt.dataset_mode and other options
-    dataset_val = create_dataset(opt, to_validate=True)  # validation dataset
+    dataset = create_dataset(opt, mode='train')  # create a dataset given opt.dataset_mode and other options
+    dataset_val = create_dataset(opt, mode='validation')  # validation dataset
+    dataset_test = create_dataset(opt, mode='test')
     dataset_size = len(dataset)  # get the number of images in the dataset.
 
     model = create_model(opt)  # create a model given opt.model and other options
@@ -96,7 +97,7 @@ if __name__ == '__main__':
                 save_result = total_iters % opt.update_html_freq == 0
                 visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
                 if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard(writer, losses, total_iters)
+                    model.log_tensorboard(writer, losses, total_iters, save_gif=False)
                 model.train()  # change networks back to train mode
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
@@ -104,6 +105,33 @@ if __name__ == '__main__':
                 print(opt.name)  # it's useful to occasionally show the experiment name on console
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
+
+            if total_iters % opt.evalutate_freq == 0:
+                print('evaluating model on labeled data')
+                losses_total = []
+                keys = []
+                loss_aggregate = {}
+                for j, (test_data) in enumerate(dataset_test):
+                    if j >= 5:
+                        break
+                    model.eval()  # change networks to eval mode
+                    with torch.no_grad():
+                        model.set_input(test_data)  # unpack data from data loader
+                        model.forward()  # run inference
+                        model.calculate_loss_values()  # get the loss values
+                        model.compute_visuals()
+                        losses = model.get_current_losses()
+                        losses_total.append(losses)
+                        model.get_current_visuals()
+                        if hasattr(model, 'log_tensorboard'):
+                            model.log_tensorboard(writer, None, total_iters, save_gif=False, use_image_name=True)
+                    keys = losses.keys()
+                for key in keys:
+                    sum_l = 0
+                    sum_l = [sum_l + losses[key] for losses in losses_total][0]
+                    loss_aggregate[key] = sum_l / len(losses_total)
+                for key in loss_aggregate:
+                    writer.add_scalar(f'test-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
 
             iter_data_time = time.time()
 

@@ -165,6 +165,7 @@ class CUT3dModel(BaseModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
+        self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device)
         self.landmarks_B = input['B_landmark'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
@@ -263,23 +264,25 @@ class CUT3dModel(BaseModel):
 
         return total_nce_loss / n_layers
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int):
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
 
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
-                                         image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
-                                         image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
-                                         image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/IDT B", max_out=85,
-                                         image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
+        if save_gif:
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
+                                             image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
+                                             image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
+                                             image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/IDT B", max_out=85,
+                                             image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
 
         axs, fig = vxm.torch.utils.init_figure(3, 4)
         vxm.torch.utils.set_axs_attribute(axs)
@@ -287,10 +290,15 @@ class CUT3dModel(BaseModel):
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
         vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
-        writer.add_figure(tag='GAN', figure=fig, global_step=global_step)
+        if use_image_name:
+            tag = f'{self.patient}/GAN'
+        else:
+            tag = 'GAN'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-        for key in losses:
-            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+        if losses is not None:
+            for key in losses:
+                writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
