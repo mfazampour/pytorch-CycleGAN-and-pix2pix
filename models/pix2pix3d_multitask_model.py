@@ -422,7 +422,8 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel):
         if epoch >= self.opt.L1_epochs:
             self.first_phase_coeff = 0
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 12)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')

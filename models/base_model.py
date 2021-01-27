@@ -1,4 +1,6 @@
+import inspect
 import os
+from inspect import getmembers, isfunction
 import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
@@ -41,6 +43,7 @@ class BaseModel(ABC):
         self.visual_names = []
         self.optimizers = []
         self.image_paths = []
+        self.loss_functions = []
         self.metric = 0  # used for learning rate policy 'plateau'
         self.min_Ganloss = 1000.0
 
@@ -294,3 +297,13 @@ class BaseModel(ABC):
 
     def generate_visuals_for_evaluation(self, data, mode):
         return {}
+
+    def calculate_loss_values(self):
+        """Can generate the loss values without calling optimize. Use it only after calling forward().
+        Created only for testing
+        Returns
+        -------
+
+        """
+        for fun in self.loss_functions:
+            getattr(self, fun)()
