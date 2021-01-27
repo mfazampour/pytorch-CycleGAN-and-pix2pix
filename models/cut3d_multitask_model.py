@@ -38,11 +38,13 @@ class CUT3DMultiTaskModel(CUT3dModel):
         parser
         """
         parser.set_defaults(norm='batch', dataset_mode='volume')
-        parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
-        parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
-        parser.add_argument('--epochs_before_reg', type=int, default=0,
-                            help='number of epochs to train the network before reg loss is used')
+        # rigid and segmentation
+        parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
+        parser.add_argument('--netSeg', type=str, default='unet_128', help='Type of network used for segmentation')
+        parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
+
+        # voxelmorph params
         parser.add_argument('--cudnn-nondet', action='store_true',
                             help='disable cudnn determinism - might slow down training')
         # network architecture parameters
@@ -59,10 +61,9 @@ class CUT3DMultiTaskModel(CUT3dModel):
                             help='prior lambda regularization for KL loss (default: 10)')
         parser.add_argument('--flow-logsigma-bias', type=float, default=-10,
                             help='negative value for initialization of the logsigma layer bias value')
-        parser.add_argument('--netSeg', type=str, default='unet_128', help='Type of network used for segmentation')
-        parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
-        parser.add_argument('--CUT_mode', type=str, default="CUT", choices='(CUT, cut, FastCUT, fastcut)')
 
+        # CUT params
+        parser.add_argument('--CUT_mode', type=str, default="CUT", choices='(CUT, cut, FastCUT, fastcut)')
         parser.add_argument('--lambda_GAN', type=float, default=1.0, help='weight for GAN loss：GAN(G(X))')
         parser.add_argument('--lambda_NCE', type=float, default=1.0, help='weight for NCE loss: NCE(G(X), X)')
         parser.add_argument('--nce_idt', type=util.str2bool, nargs='?', const=True, default=False,
@@ -79,12 +80,16 @@ class CUT3DMultiTaskModel(CUT3dModel):
         parser.add_argument('--flip_equivariance',
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
+
+        # others
         parser.add_argument('--use_rigid_branch', action='store_true', help='train the rigid registration network')
         parser.add_argument('--reg_idt_B', action='store_true', help='use idt_B from CUT model instead of real B')
+        parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
         parser.set_defaults(pool_size=0)  # no image pooling
         if is_train:
             parser.set_defaults(pool_size=0, gan_mode='vanilla')
+            # loss params
             parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
             parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
@@ -97,10 +102,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                 help='number of steps to train the registration network for each simulated US')
             parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
                                 help='type of the similarity used for training voxelmorph')
-
-            # loss hyperparameters
+            parser.add_argument('--epochs_before_reg', type=int, default=0,
+                                help='number of epochs to train the network before reg loss is used')
             parser.add_argument('--image-loss', default='mse',
                                 help='image reconstruction loss - can be mse or ncc (default: mse)')
+
         opt, _ = parser.parse_known_args()
 
         # Set default parameters for CUT and FastCUT
@@ -338,7 +344,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         # fourth, Def registration:
         if self.opt.bidir:
-            loss_DefReg_fake = self.criterionDefReg(self.deformed_fake_B, self.real_B)
+            loss_DefReg_fake = self.criterionDefReg(self.deformed_B.detach(), self.fake_B)
         else:
             loss_DefReg_fake = 0
 
