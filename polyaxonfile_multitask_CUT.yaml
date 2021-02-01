@@ -59,6 +59,9 @@ params:
   epoch: init
   netReg: "NormalNet"
   netSeg: "unet_small"
+  n_blocks_global: 9
+  n_blocks_local:3
+  ngf: 24
 
 
 
@@ -88,6 +91,9 @@ run:
                                     --epochs_before_reg={{ epochs_before_reg }} \
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
+                                    --n_blocks_global={{ n_blocks_global }} \
+                                    --n_blocks_local={{ n_blocks_local }} \
+                                    --ngf={{ n/f }} \
                                     --continue_train \
                                     --netReg {{ netReg }} \
                                     --netSeg  {{ netSeg }} \

@@ -318,7 +318,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
 
-        self.loss_G_NCE = self.compute_G_loss()
+      #  self.loss_G_NCE = self.compute_G_loss()
 
         # Third, rigid registration
         loss_G_Reg = self.criterionRigidReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg

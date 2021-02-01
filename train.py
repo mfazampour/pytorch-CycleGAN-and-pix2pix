@@ -76,6 +76,9 @@ if __name__ == '__main__':
                 model.setup(opt)  # regular setup: load and print networks; create schedulers
                 model.parallelize()
             model.set_input(data)  # unpack data from dataset and apply preprocessing
+            import gc
+
+
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
             if len(opt.gpu_ids) > 0:
@@ -113,6 +116,8 @@ if __name__ == '__main__':
             model.save_networks('latest')
             model.save_networks(epoch)
 
+        print("---------- Print out GPU memory every epoch----------")
+        print(torch.cuda.memory_allocated())
         print('End of epoch %d / %d \t Time Taken: %d sec' % (
             epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
         model.update_learning_rate(epoch=epoch)  # update learning rates at the end of every epoch.

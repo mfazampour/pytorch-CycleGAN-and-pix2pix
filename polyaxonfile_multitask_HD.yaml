@@ -40,7 +40,7 @@ params:
   lr_Seg: 0.0001
   lr_Reg: 0.0001
   lr_policy: "linear"
-  display_freq: 50
+  display_freq: 200
   print_freq: 20
   lr_decay_iters: 1
   batch_size: 1
@@ -48,17 +48,16 @@ params:
   n_epochs: 50
   netG: "global"
   CUT_mode: "CUT"
-  model: "pix2pixHD_multitask"
+  model: "pix2pixHD"
   name: "HD_multi"
   val_fold: "validation/"
   train_fold: "train/"
   load_mask: True
   display_id: -1
   load_init_models: "/data/Prostate_Reg_KM/multitask/init_weights_cut_2/"
-  epochs_before_reg: 0
+  epochs_before_reg: 1000
   epoch: init
-  netReg: "NormalNet"
-  netSeg: "unet_small"
+ 
 
 
 
@@ -68,10 +67,7 @@ run:
                                     --dataset_mode={{ dataset_mode }} \
                                     --output_nc={{ output_nc }} \
                                     --input_nc={{ input_nc }} \
-                                    --lr {{ lr }} \
-                                    --lr_Def {{ lr_Def }} \
-                                    --lr_Seg {{ lr_Seg }} \
-                                    --lr_Reg {{ lr_Reg }} \
+                                    --lr {{ lr }} \                          
                                     --lr_policy={{ lr_policy }} \
                                     --display_freq={{ display_freq }} \
                                     --print_freq {{ print_freq }}
@@ -85,11 +81,8 @@ run:
                                     --train_fold={{ train_fold }} \ 
                                     --load_mask={{ load_mask }} \ 
                                     --load_init_models={{ load_init_models }} \
-                                    --epochs_before_reg={{ epochs_before_reg }} \
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
                                     --continue_train \
-                                    --netReg {{ netReg }} \
-                                    --netSeg  {{ netSeg }} \
                                     --no_instance
                                     --no_vgg_loss
