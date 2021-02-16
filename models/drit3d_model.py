@@ -29,6 +29,48 @@ class DRIT3dModel(BaseModel):
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
 
+        # common
+        parser.add_argument('--pad_type', type=str, default='replicate', help='padding type')
+        parser.add_argument('--activ', type=str, default='lrelu', help='activation layer type')
+        # content
+        parser.add_argument('--output_nc_cont', type=int, default=64, help='output ch of content encoder')
+        parser.add_argument('--ndf_cont', type=int, default=16, help='number of filters of content encoder')
+        parser.add_argument('--n_layers_cont', type=int, default=3, help='number of layers of content encoder')
+        parser.add_argument('--norm_cont', type=str, default='none', help='norm layer of content encoder')
+        parser.add_argument('--lr_content', type=float, default=0.0001, help='learning rate of the content encoder')
+        # attribute
+        parser.add_argument('--output_nc_attr', type=int, default=16, help='output ch of attribute encoder')
+        parser.add_argument('--ndf_attr', type=int, default=16, help='number of filters of attribute encoder')
+        parser.add_argument('--n_layers_attr', type=int, default=3, help='number of layers of attribute encoder')
+        parser.add_argument('--norm_attr', type=str, default='in', help='norm layer of attribute encoder')
+        # generator
+        parser.add_argument('--mlp_nc', type=int, default=16, help='number of filters of mlp layer in generator')
+        parser.add_argument('--norm_gen', type=str, default='in', help='norm layer of generator')
+        # discriminator domain
+        parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
+        parser.add_argument('--n_scale', type=int, default=3, help='number of scales of the discriminator')
+        parser.add_argument('--norm_d', type=str, default='in', help='norm layer of discriminator')
+        # discriminator content
+        parser.add_argument('--ndcf', type=int, default=16, help='number of filters of disc content')
+        parser.add_argument('--n_layers_d_cont', type=int, default=1, help='number of layers of disc content')
+        parser.add_argument('--norm_d_cont', type=str, default='in', help='norm layer of disc content')
+        parser.add_argument('--netD_cont', type=str, default='n_layers', help='type of the disc content')
+        # losses
+        parser.add_argument('--recon_loss', type=str, default='l1', choices=['l1', 'lcc'], help='type of the cycle consistency loss')
+        parser.add_argument('--use_ms', action='store_true', help='use mode seeking loss')
+        parser.add_argument('--cont_d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type content disc loss')
+        parser.add_argument('--d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type domain disc loss')
+        # lambdas
+        parser.add_argument('--lambda_cont_adv', type=float, default=1.0, help='coeff of content adv loss')
+        parser.add_argument('--lambda_domain_adv', type=float, default=1.0, help='coeff of domain adv loss')
+        parser.add_argument('--lambda_domain_adv_random', type=float, default=1.0, help='coeff of domain adv loss')
+        parser.add_argument('--lambda_attr_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
+        parser.add_argument('--lambda_cont_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
+        parser.add_argument('--lambda_cc', type=float, default=1.0, help='coeff of cylce consistency loss')
+        parser.add_argument('--lambda_recon', type=float, default=1.0, help='coeff of reconstruction loss')
+        parser.add_argument('--lambda_latent', type=float, default=1.0, help='coeff of latent reconstruction loss')
+
+
         parser.set_defaults(pool_size=0, dataset_mode='volume')  # no image pooling
 
         return parser
@@ -42,11 +84,14 @@ class DRIT3dModel(BaseModel):
             self.gpu = 'cpu'
         self.random_shape = None
 
-        self.loss_names = []  # todo
+        self.loss_names = ['G_GAN_A', 'G_GAN_B', 'G_GAN_Acontent', 'G_GAN_Bcontent', 'kl_za_a',
+                           'kl_za_b', 'kl_zc_a', 'kl_zc_b', 'G_CC_A', 'G_CC_B', 'G_CC_AA', 'G_CC_BB',
+                           'cc_za_a', 'cc_za_b', 'cc_zc_a', 'cc_zc_b', 'G', 'disA', 'disB', 'dis_cont']
+
         self.visual_names = []
 
         if self.isTrain:
-            self.model_names = ['Enc_c', 'Enc_atr_A', 'Enc_atr_B', 'Gen_A', 'Gen_B']
+            self.model_names = ['Enc_c', 'Enc_attr_A', 'Enc_attr_B', 'Gen_A', 'Gen_B']
             self.model_names += ['Dis_A', 'Dis_B', 'Dis_cont']
         else:  # during test time, only load G
             self.model_names = ['Enc_c', 'Enc_atr_A', 'Enc_atr_B', 'Gen_A', 'Gen_B']
@@ -54,29 +99,28 @@ class DRIT3dModel(BaseModel):
         # encoders
         # input_nc, output_nc, ndf, netE, n_layers=3, n_res=3, active='rely', norm='batch', pad_type='replicate',
         #              init_type='normal', init_gain=0.02, gpu_ids=[]
-        self.enc_c = networks3d.define_E(opt.input_nc, opt.output_nc_cont, opt.ndf_cont, 'content', opt.n_layers_cont,
-                                         opt.active, opt.norm_cont, opt.pad_type, opt.init_type,
-                                         opt.init_gain, gpu_ids=self.gpu_ids)
-        self.enc_atr_a = networks3d.define_E(opt.input_nc, opt.output_nc_attr, opt.ndf_attr, 'attribute',
-                                             opt.n_layers_attr, opt.active, opt.norm_attr, opt.pad_type,
-                                             opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
-        self.enc_atr_b = networks3d.define_E(opt.input_nc, opt.output_nc_attr, opt.ndf_attr, 'attribute',
-                                             opt.n_layers_attr, opt.active, opt.norm_attr, opt.pad_type,
-                                             opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
+        self.netEnc_c = networks3d.define_E(opt.input_nc, opt.output_nc_cont, opt.ndf_cont, 'content', opt.n_layers_cont,
+                                            opt.activ, opt.norm_cont, opt.pad_type, opt.init_type,
+                                            opt.init_gain, gpu_ids=self.gpu_ids)
+        self.netEnc_attr_A = networks3d.define_E(opt.input_nc, opt.output_nc_attr, opt.ndf_attr, 'attribute',
+                                                 opt.n_layers_attr, opt.activ, opt.norm_attr, opt.pad_type,
+                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
+        self.netEnc_attr_B = networks3d.define_E(opt.input_nc, opt.output_nc_attr, opt.ndf_attr, 'attribute',
+                                                 opt.n_layers_attr, opt.activ, opt.norm_attr, opt.pad_type,
+                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
 
         # generator
-        # opt should have mlp_dim, style_dim, n_layers
-        self.gen_a = networks3d.define_G(opt.output_nc_cont, opt.output_nc, ngf=64, netG=opt.netG, opt=opt)
-        self.gen_b = networks3d.define_G(opt.output_nc_cont, opt.output_nc, ngf=64, netG=opt.netG, opt=opt)
+        self.netGen_A = networks3d.define_G(opt.output_nc_cont, opt.output_nc, ngf=opt.ngf, netG=opt.netG, opt=opt)
+        self.netGen_B = networks3d.define_G(opt.output_nc_cont, opt.output_nc, ngf=opt.ngf, netG=opt.netG, opt=opt)
 
         if self.isTrain:
             # opt should have n_scale_d if multiscale
-            self.dis_a = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
-                                             opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
-            self.dis_b = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
-                                             opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
-            self.dis_cont = networks3d.define_D(opt.output_nc_cont, opt.ndcf, opt.netD_cont, opt.n_layers_d_cont,
-                                                opt.norm_d_cont, opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
+            self.netDis_A = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+                                                opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
+            self.netDis_B = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+                                                opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
+            self.netDis_cont = networks3d.define_D(opt.output_nc_cont, opt.ndcf, opt.netD_cont, opt.n_layers_d_cont,
+                                                   opt.norm_d_cont, opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
 
             # opt should contain lr, lr_content, weight_decay, beta1, beta2
             self.create_optimizers(opt)
@@ -91,24 +135,26 @@ class DRIT3dModel(BaseModel):
     def create_optimizers(self, opt):
         lr = opt.lr
         lr_dcontent = opt.lr_content
-        weight_decay = opt.weight_decay
+        weight_decay = 0
         beta1 = opt.beta1
         beta2 = opt.beta2
         # optimizers
-        enc_a_params = list(self.enc_atr_a.parameters()) + list(self.enc_atr_b.parameters())
-        gen_params = list(self.gen_a.parameters()) + list(self.gen_b.parameters())
-        self.disA_opt = torch.optim.Adam(self.dis_a.parameters(), lr=lr, betas=(beta1, beta2),
+        enc_a_params = list(self.netEnc_attr_A.parameters()) + list(self.netEnc_attr_B.parameters())
+        gen_params = list(self.netGen_A.parameters()) + list(self.netGen_B.parameters())
+        self.disA_opt = torch.optim.Adam(self.netDis_A.parameters(), lr=lr, betas=(beta1, beta2),
                                          weight_decay=weight_decay)
-        self.disB_opt = torch.optim.Adam(self.dis_b.parameters(), lr=lr, betas=(beta1, beta2),
+        self.disB_opt = torch.optim.Adam(self.netDis_B.parameters(), lr=lr, betas=(beta1, beta2),
                                          weight_decay=weight_decay)
-        self.disContent_opt = torch.optim.Adam(self.dis_cont.parameters(), lr=lr_dcontent, betas=(beta1, beta2),
+        self.disContent_opt = torch.optim.Adam(self.netDis_cont.parameters(), lr=lr_dcontent, betas=(beta1, beta2),
                                                weight_decay=weight_decay)
-        self.enc_c_opt = torch.optim.Adam(self.enc_c.parameters(), lr=lr, betas=(beta1, beta2),
+        self.enc_c_opt = torch.optim.Adam(self.netEnc_c.parameters(), lr=lr, betas=(beta1, beta2),
                                           weight_decay=weight_decay)
         self.enc_a_opt = torch.optim.Adam([p for p in enc_a_params if p.requires_grad], lr=lr, betas=(beta1, beta2),
                                           weight_decay=weight_decay)
         self.gen_opt = torch.optim.Adam([p for p in gen_params if p.requires_grad], lr=lr, betas=(beta1, beta2),
                                         weight_decay=weight_decay)
+        self.optimizers = [self.disA_opt, self.disB_opt, self.disContent_opt,
+                           self.enc_c_opt, self.enc_a_opt, self.gen_opt]
 
     def data_dependent_initialize(self, data):
         pass
@@ -132,33 +178,28 @@ class DRIT3dModel(BaseModel):
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        # Both real_B and real_A if we also use the loss from the identity mapping: NCE(G(Y), Y)) in NCE loss
-
-        # self.real = torch.cat((self.real_A, self.real_B),
-        #                       dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
 
         data_split = self.opt.batch_size // 2
 
         self.real_a_encoded, self.real_b_encoded = self.real_A[0:data_split], self.real_B[0:data_split]
         self.real_a_random, self.real_b_random = self.real_A[data_split:], self.real_B[data_split:]
 
-        self.zc_a, self.zc_b = self.enc_c(self.real_a_encoded, self.real_b_encoded)
-        self.za_a = self.enc_atr_a(self.real_a_encoded)
-        self.za_b = self.enc_atr_b(self.real_b_encoded)
+        self.zc_a, self.zc_b = self.netEnc_c(self.real_a_encoded, self.real_b_encoded)
+        self.za_a = self.netEnc_attr_A(self.real_a_encoded)
+        self.za_b = self.netEnc_attr_B(self.real_b_encoded)
 
         if self.random_shape is None:
             self.random_shape = self.za_a.shape
-
         self.z_random = self.get_z_random()
 
-        if self.opt.ms:
+        if self.opt.use_ms:
             self.z_random2 = self.get_z_random()
             input_content_forA = torch.cat((self.zc_b, self.zc_a, self.zc_b, self.zc_b), 0)
             input_content_forB = torch.cat((self.zc_a, self.zc_b, self.zc_a, self.zc_a), 0)
             input_attr_forA = torch.cat((self.za_a, self.za_a, self.z_random, self.z_random2), 0)
             input_attr_forB = torch.cat((self.za_b, self.za_b, self.z_random, self.z_random2), 0)
-            output_fakeA = self.gen_a.decode(input_content_forA, input_attr_forA)
-            output_fakeB = self.gen_b.decode(input_content_forB, input_attr_forB)
+            output_fakeA = self.netGen_A(input_content_forA, input_attr_forA)
+            output_fakeB = self.netGen_B(input_content_forB, input_attr_forB)
             self.fake_a_encoded, self.fake_aa_encoded, self.fake_a_random, self.fake_a_random2 = torch.split(
                 output_fakeA, self.zc_a.size(0), dim=0)
             self.fake_b_encoded, self.fake_bb_encoded, self.fake_b_random, self.fake_b_random2 = torch.split(
@@ -170,8 +211,8 @@ class DRIT3dModel(BaseModel):
             input_content_forB = torch.cat((self.zc_a, self.zc_b, self.zc_a), 0)
             input_attr_forA = torch.cat((self.za_a, self.za_a, self.z_random,), 0)
             input_attr_forB = torch.cat((self.za_b, self.za_b, self.z_random), 0)
-            output_fakeA = self.gen_a.decode(input_content_forA, input_attr_forA)
-            output_fakeB = self.gen_b.decode(input_content_forB, input_attr_forB)
+            output_fakeA = self.netGen_A(input_content_forA, input_attr_forA)
+            output_fakeB = self.netGen_B(input_content_forB, input_attr_forB)
 
             self.fake_a_encoded, self.fake_aa_encoded, self.fake_a_random = torch.split(output_fakeA,
                                                                                         self.zc_a.size(0), dim=0)
@@ -179,17 +220,17 @@ class DRIT3dModel(BaseModel):
                                                                                         self.zc_a.size(0), dim=0)
 
         # Backward translation
-        self.z_content_recon_b, self.z_content_recon_a = self.enc_c(self.fake_a_encoded,
-                                                                    self.fake_b_encoded)
+        self.z_content_recon_b, self.z_content_recon_a = self.netEnc_c(self.fake_a_encoded,
+                                                                       self.fake_b_encoded)
 
-        self.z_attr_recon_a = self.enc_atr_a(self.fake_a_encoded)
-        self.z_attr_recon_b = self.enc_atr_b(self.fake_b_encoded)
+        self.z_attr_recon_a = self.netEnc_attr_A(self.fake_a_encoded)
+        self.z_attr_recon_b = self.netEnc_attr_B(self.fake_b_encoded)
 
-        self.fake_a_recon = self.gen_a.decode(self.z_content_recon_a, self.z_attr_recon_a)
-        self.fake_b_recon = self.gen_b.decode(self.z_content_recon_b, self.z_attr_recon_b)
+        self.fake_a_recon = self.netGen_A(self.z_content_recon_a, self.z_attr_recon_a)
+        self.fake_b_recon = self.netGen_B(self.z_content_recon_b, self.z_attr_recon_b)
 
-        self.z_random_recon_b = self.enc_atr_b(self.fake_b_random)
-        self.z_random_recon_a = self.enc_atr_a(self.fake_a_random)
+        self.z_random_recon_b = self.netEnc_attr_B(self.fake_b_random)
+        self.z_random_recon_a = self.netEnc_attr_A(self.fake_a_random)
 
     def get_z_random(self):
         z = torch.randn(self.random_shape)
@@ -197,42 +238,42 @@ class DRIT3dModel(BaseModel):
 
     def compute_D_cont_loss(self):
         self.disContent_opt.zero_grad()
-        loss_netD = self.discriminator_update_criterion(netD=self.dis_cont, real=self.zc_a.detach(),
+        loss_netD = self.discriminator_update_criterion(netD=self.netDis_cont, real=self.zc_a.detach(),
                                                         fake=self.zc_b.detach(), d_type=self.opt.cont_d_loss)
         loss_netD.backward()
-        self.loss_D_Content = loss_netD.item()
+        self.loss_dis_cont = loss_netD.item()
         # nn.utils.clip_grad_norm_(self.dis_cont.parameters(), 5)
         self.disContent_opt.step()
 
     def update_D(self):
         # update disA
         self.disA_opt.zero_grad()
-        loss_D1_A = self.backward_D(self.dis_a, self.real_a_encoded, self.fake_a_encoded)
-        loss_D2_A = self.backward_D(self.dis_a, self.real_a_random, self.fake_a_random)
+        loss_D1_A = self.backward_D(self.netDis_A, self.real_a_encoded, self.fake_a_encoded)
+        loss_D2_A = self.backward_D(self.netDis_A, self.real_a_random, self.fake_a_random)
         disA2_loss = loss_D2_A.item()
-        if self.opt.ms:
-            loss_D2_A2 = self.backward_D(self.dis_a, self.real_a_random, self.fake_a_random2)
+        if self.opt.use_ms:
+            loss_D2_A2 = self.backward_D(self.netDis_A, self.real_a_random, self.fake_a_random2)
             disA2_loss += loss_D2_A2.item()
 
-        self.disA_loss = (loss_D1_A.item() + disA2_loss) / 2
+        self.loss_disA = (loss_D1_A.item() + disA2_loss) / 2
         self.disA_opt.step()
 
         # update disB
         self.disB_opt.zero_grad()
-        loss_D1_B = self.backward_D(self.dis_b, self.real_b_encoded, self.fake_b_encoded)
-        loss_D2_B = self.backward_D(self.dis_b, self.real_b_random, self.fake_b_random)
+        loss_D1_B = self.backward_D(self.netDis_B, self.real_b_encoded, self.fake_b_encoded)
+        loss_D2_B = self.backward_D(self.netDis_B, self.real_b_random, self.fake_b_random)
         disB2_loss = loss_D2_B.item()
-        if self.opts.ms:
-            loss_D2_B2 = self.backward_D(self.dis_b, self.real_b_random, self.fake_b_random2)
+        if self.opt.use_ms:
+            loss_D2_B2 = self.backward_D(self.netDis_B, self.real_b_random, self.fake_b_random2)
             disB2_loss += loss_D2_B2.item()
-        self.disB_loss = (loss_D1_B.item() + disB2_loss) / 2
+        self.loss_disB = (loss_D1_B.item() + disB2_loss) / 2
         self.disB_opt.step()
 
         # update disContent
         self.compute_D_cont_loss()
 
     def backward_D(self, netD, real, fake):
-        loss_netD = self.discriminator_update_criterion(netD=netD, real=real, fake=fake, d_type=self.opt.d_type)
+        loss_netD = self.discriminator_update_criterion(netD=netD, real=real, fake=fake, d_type=self.opt.d_loss)
         loss_netD.backward()
         return loss_netD
 
@@ -310,21 +351,21 @@ class DRIT3dModel(BaseModel):
         return loss_D
 
     def update_EG(self):
-        self.set_requires_grad([self.dis_a, self.dis_b, self.dis_cont], False)
+        self.set_requires_grad([self.netDis_A, self.netDis_B, self.netDis_cont], False)
         self.enc_c_opt.zero_grad()
         self.enc_a_opt.zero_grad()
         self.gen_opt.zero_grad()
         self.backward_EG()
 
         # update G, Ec
-        self.set_requires_grad([self.enc_atr_a, self.enc_atr_b], False)
+        self.set_requires_grad([self.netEnc_attr_A, self.netEnc_attr_B], False)
         self.backward_G_alone()
-        self.set_requires_grad([self.enc_atr_a, self.enc_atr_b], True)
+        self.set_requires_grad([self.netEnc_attr_A, self.netEnc_attr_B], True)
 
         self.enc_a_opt.step()
         self.enc_c_opt.step()
         self.gen_opt.step()
-        self.set_requires_grad([self.dis_a, self.dis_b, self.dis_cont], True)
+        self.set_requires_grad([self.netDis_A, self.netDis_B, self.netDis_cont], True)
 
     def backward_EG(self):
         """
@@ -335,8 +376,8 @@ class DRIT3dModel(BaseModel):
         loss_G_GAN_Bcontent = self.backward_G_GAN_content(self.zc_b) * self.opt.lambda_cont_adv
 
         # 2. Domain adversarial loss
-        loss_G_GAN_A = self.backward_G_GAN(self.fake_a_encoded, self.dis_a) * self.opt.lambda_domain_adv
-        loss_G_GAN_B = self.backward_G_GAN(self.fake_b_encoded, self.dis_b) * self.opt.lambda_domain_adv
+        loss_G_GAN_A = self.backward_G_GAN(self.fake_a_encoded, self.netDis_A) * self.opt.lambda_domain_adv
+        loss_G_GAN_B = self.backward_G_GAN(self.fake_b_encoded, self.netDis_B) * self.opt.lambda_domain_adv
 
         # Regularization on the attribute representation (KL loss)
         loss_kl_za_a = self._l2_regularize(self.za_a) * self.opt.lambda_attr_reg
@@ -351,55 +392,55 @@ class DRIT3dModel(BaseModel):
         loss_cc_za_b = self.l1(self.za_b, self.z_attr_recon_b)
         loss_cc_zc_a = self.l1(self.zc_a, self.z_content_recon_a)
         loss_cc_zc_b = self.l1(self.zc_b, self.z_content_recon_b)
-        loss_G_L1_A = self.criterion_cc(self.fake_a_recon, self.real_a_encoded) * self.opt.lambda_cc
-        loss_G_L1_B = self.criterion_cc(self.fake_b_recon, self.real_b_encoded) * self.opt.lambda_cc
+        loss_G_CC_A = self.criterion_cc(self.fake_a_recon, self.real_a_encoded) * self.opt.lambda_cc
+        loss_G_CC_B = self.criterion_cc(self.fake_b_recon, self.real_b_encoded) * self.opt.lambda_cc
 
         # 4. Reconstruction loss
-        loss_G_L1_AA = self.criterion_cc(self.fake_aa_encoded, self.real_a_encoded) * self.opt.lambda_recon
-        loss_G_L1_BB = self.criterion_cc(self.fake_bb_encoded, self.real_b_encoded) * self.opt.lambda_recon
+        loss_G_CC_AA = self.criterion_cc(self.fake_aa_encoded, self.real_a_encoded) * self.opt.lambda_recon
+        loss_G_CC_BB = self.criterion_cc(self.fake_bb_encoded, self.real_b_encoded) * self.opt.lambda_recon
 
         loss_G = loss_G_GAN_A + loss_G_GAN_B + \
-                 loss_G_L1_AA + loss_G_L1_BB + \
-                 loss_G_L1_A + loss_G_L1_B + \
+                 loss_G_CC_AA + loss_G_CC_BB + \
+                 loss_G_CC_A + loss_G_CC_B + \
                  loss_kl_za_a + loss_kl_za_b + \
                  loss_G_GAN_Acontent + loss_G_GAN_Bcontent + \
                  loss_kl_zc_a + loss_kl_zc_b
 
         loss_G.backward(retain_graph=True)
 
-        self.gan_loss_a = loss_G_GAN_A.item()
-        self.gan_loss_b = loss_G_GAN_B.item()
-        self.gan_loss_acontent = loss_G_GAN_Acontent.item()
-        self.gan_loss_bcontent = loss_G_GAN_Bcontent.item()
-        self.kl_loss_za_a = loss_kl_za_a.item()
-        self.kl_loss_za_b = loss_kl_za_b.item()
-        self.kl_loss_zc_a = loss_kl_zc_a.item()
-        self.kl_loss_zc_b = loss_kl_zc_b.item()
-        self.l1_recon_A_loss = loss_G_L1_A.item()
-        self.l1_recon_B_loss = loss_G_L1_B.item()
-        self.l1_recon_AA_loss = loss_G_L1_AA.item()
-        self.l1_recon_BB_loss = loss_G_L1_BB.item()
-        self.loss_recon_za_a = loss_cc_za_a.item()
-        self.loss_recon_za_b = loss_cc_za_b.item()
-        self.loss_recon_zc_a = loss_cc_zc_a.item()
-        self.loss_recon_zc_b = loss_cc_zc_b.item()
-        self.G_loss = loss_G.item()
+        self.loss_G_GAN_A = loss_G_GAN_A.item()
+        self.loss_G_GAN_B = loss_G_GAN_B.item()
+        self.loss_G_GAN_Acontent = loss_G_GAN_Acontent.item()
+        self.loss_G_GAN_Bcontent = loss_G_GAN_Bcontent.item()
+        self.loss_kl_za_a = loss_kl_za_a.item()
+        self.loss_kl_za_b = loss_kl_za_b.item()
+        self.loss_kl_zc_a = loss_kl_zc_a.item()
+        self.loss_kl_zc_b = loss_kl_zc_b.item()
+        self.loss_G_CC_A = loss_G_CC_A.item()
+        self.loss_G_CC_B = loss_G_CC_B.item()
+        self.loss_G_CC_AA = loss_G_CC_AA.item()
+        self.loss_G_CC_BB = loss_G_CC_BB.item()
+        self.loss_cc_za_a = loss_cc_za_a.item()
+        self.loss_cc_za_b = loss_cc_za_b.item()
+        self.loss_cc_zc_a = loss_cc_zc_a.item()
+        self.loss_cc_zc_b = loss_cc_zc_b.item()
+        self.loss_G = loss_G.item()
 
     def content_gan_update_criterion(self, content):
-        if self.opt.cont_d_type is None:
+        if self.opt.cont_d_loss is None:
             raise NotImplementedError
-        if self.opt.cont_d_type == 'wgan':
-            return 0.5 * self.wgan_gen_update(content, netD=self.dis_cont)
-        elif self.opt.cont_d_type == 'minmax':
+        if self.opt.cont_d_loss == 'wgan':
+            return 0.5 * self.wgan_gen_update(content, netD=self.netDis_cont)
+        elif self.opt.cont_d_loss == 'minmax':
             return self.minmax_content_gan(content, lsgan_mode=False)
-        elif self.opt.cont_d_type == 'lsgan':
+        elif self.opt.cont_d_loss == 'lsgan':
             return self.minmax_content_gan(content, lsgan_mode=True)
         else:
             raise NotImplementedError
 
     def minmax_content_gan(self, content, lsgan_mode=False):
-        outs = self.dis_cont(content)
-        all_half = 0.5 * torch.ones((outs.size(0))).cuda(self.gpu)
+        outs = self.netDis_cont(content)
+        all_half = 0.5 * torch.ones_like(outs)
         if lsgan_mode:
             ad_loss = F.mse_loss(outs, all_half)
         else:
@@ -415,13 +456,13 @@ class DRIT3dModel(BaseModel):
         return self.generator_update_criterion(fake, netD)
 
     def generator_update_criterion(self, fake=None, netD=None):
-        if self.opts.d_type is None:
+        if self.opt.d_loss is None:
             raise NotImplementedError
-        if self.opts.d_type == 'wgan':
+        if self.opt.d_loss == 'wgan':
             return self.wgan_gen_update(fake, netD=netD)
-        elif self.opts.d_type == 'minmax':
+        elif self.opt.d_loss == 'minmax':
             return self.minmax_gan_update(fake, netD, lsgan_mode=False)
-        elif self.opts.d_type == 'lsgan':
+        elif self.opt.d_loss == 'lsgan':
             return self.minmax_gan_update(fake, netD, lsgan_mode=True)
         else:
             raise NotImplementedError
@@ -446,13 +487,13 @@ class DRIT3dModel(BaseModel):
     def backward_G_alone(self):
 
         loss_G_GAN2_A = self.backward_G_GAN(self.fake_a_random,
-                                            self.dis_a2) * self.opts.domain_adv_random_a
+                                            self.netDis_A) * self.opt.lambda_domain_adv_random
         loss_G_GAN2_B = self.backward_G_GAN(self.fake_b_random,
-                                            self.dis_b2) * self.opts.domain_adv_random_b
+                                            self.netDis_B) * self.opt.lambda_domain_adv_random
 
-        if self.opts.ms:
-            loss_G_GAN2_A2 = self.backward_G_GAN(self.fake_a_random2, self.dis_a2) * self.opts.domain_adv_random_a
-            loss_G_GAN2_B2 = self.backward_G_GAN(self.fake_b_random2, self.dis_b2) * self.opts.domain_adv_random_b
+        if self.opt.use_ms:
+            loss_G_GAN2_A2 = self.backward_G_GAN(self.fake_a_random2, self.netDis_A) * self.opt.lambda_domain_adv_random
+            loss_G_GAN2_B2 = self.backward_G_GAN(self.fake_b_random2, self.netDis_B) * self.opt.lambda_domain_adv_random
             lz_AB = torch.mean(torch.abs(self.fake_b_random2 - self.fake_b_random)) / torch.mean(
                 torch.abs(self.z_random2 - self.z_random))
             lz_BA = torch.mean(torch.abs(self.fake_a_random2 - self.fake_a_random)) / torch.mean(
@@ -462,33 +503,24 @@ class DRIT3dModel(BaseModel):
             loss_lz_BA = 1 / (lz_BA + eps)
 
         loss_z_L1_b = torch.mean(torch.abs(self.z_random_recon_b -
-                                           self.z_random)) * self.opts.latent_b
+                                           self.z_random)) * self.opt.lambda_latent
 
         loss_z_L1_a = torch.mean(torch.abs(self.z_random_recon_a -
-                                           self.z_random)) * self.opts.latent_a
+                                           self.z_random)) * self.opt.lambda_latent
 
-        if self.opts.adv_only:
-            loss_z_L1 = loss_G_GAN2_A + loss_G_GAN2_B
-        else:
-            loss_z_L1 = loss_z_L1_b + loss_z_L1_a + loss_G_GAN2_A + loss_G_GAN2_B
 
-        if self.opts.ms:
-            if self.opts.adv_only:
-                loss_z_L1 += (loss_G_GAN2_A2 + loss_G_GAN2_B2)
-            else:
-                loss_z_L1 += (loss_G_GAN2_A2 + loss_G_GAN2_B2)
-                loss_z_L1 += (loss_lz_AB + loss_lz_BA)
+        loss_z_L1 = loss_z_L1_b + loss_z_L1_a + loss_G_GAN2_A + loss_G_GAN2_B
+
+        if self.opt.use_ms:
+            loss_z_L1 += (loss_G_GAN2_A2 + loss_G_GAN2_B2)
+            loss_z_L1 += (loss_lz_AB + loss_lz_BA)
 
         loss_z_L1.backward()
 
-        if self.opts.adv_only:
-            self.gan2_loss_a = loss_G_GAN2_A.item()
-            self.gan2_loss_b = loss_G_GAN2_B.item()
-        else:
-            self.l1_recon_z_loss_a = loss_z_L1_a.item()
-            self.l1_recon_z_loss_b = loss_z_L1_b.item()
-            self.gan2_loss_a = loss_G_GAN2_A.item()
-            self.gan2_loss_b = loss_G_GAN2_B.item()
+        self.l1_recon_z_loss_a = loss_z_L1_a.item()
+        self.l1_recon_z_loss_b = loss_z_L1_b.item()
+        self.gan2_loss_a = loss_G_GAN2_A.item()
+        self.gan2_loss_b = loss_G_GAN2_B.item()
 
     def _l2_regularize(self, mu):
         mu_2 = torch.pow(mu, 2)
@@ -497,40 +529,38 @@ class DRIT3dModel(BaseModel):
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
                         save_gif=True, use_image_name=False):
-        image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
-        image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
-        image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
-
-        if save_gif:
-            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
-                                             image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
-                                             global_step=global_step)
-            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
-                                             image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
-                                             global_step=global_step)
-            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
-                                             image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
-                                             global_step=global_step)
-            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/IDT B", max_out=85,
-                                             image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(
-                                                 dim=0).cpu().detach().numpy(),
-                                             global_step=global_step)
-
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
+        volumes = OrderedDict(mr_real=self.real_a_encoded[0:1].cpu(),
+                              mr_content=self.fake_a_random[0:1].cpu(),
+                              mr_fake=self.fake_a_encoded[0:1].cpu(),
+                              mr_reconstructed=self.fake_aa_encoded[0:1].cpu(),
+                              us_real=self.real_b_encoded[0:1].cpu(),
+                              us_content=self.fake_b_random[0:1].cpu(),
+                              us_fake=self.fake_b_encoded[0:1].cpu(),
+                              us_reconstructed=self.fake_bb_encoded[0:1].cpu())
+        axs, fig = vxm.torch.utils.init_figure(3, len(volumes.keys()))
         vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-        vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
+        for i, (key) in enumerate(volumes):
+            vxm.torch.utils.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
         if use_image_name:
-            tag = f'{self.patient}/GAN'
+            tag = f'{self.patient}/images'
         else:
-            tag = 'GAN'
+            tag = 'images'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:
             for key in losses:
-                writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+                if 'gan' in key.lower() and 'cont' not in key.lower():
+                    writer.add_scalar(f'GAN/{key}', scalar_value=losses[key], global_step=global_step)
+                elif 'dis' in key.lower() and 'cont' not in key:
+                    writer.add_scalar(f'DIS/{key}', scalar_value=losses[key], global_step=global_step)
+                elif 'cont' in key.lower():
+                    writer.add_scalar(f'CONT/{key}', scalar_value=losses[key], global_step=global_step)
+                elif 'kl' in key.lower():
+                    writer.add_scalar(f'KL/{key}', scalar_value=losses[key], global_step=global_step)
+                elif 'recon' in key.lower():
+                    writer.add_scalar(f'RECON/{key}', scalar_value=losses[key], global_step=global_step)
+                else:
+                    writer.add_scalar(f'other/{key}', scalar_value=losses[key], global_step=global_step)
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
