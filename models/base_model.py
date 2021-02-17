@@ -170,7 +170,10 @@ class BaseModel(ABC):
         errors_ret = OrderedDict()
         for name in self.loss_names:
             if isinstance(name, str):
-                errors_ret[name] = float(getattr(self, 'loss_' + name))  # float(...) works for both scalar tensor and float number
+                if getattr(self, 'loss_' + name) is None:
+                    print(f'loss_{name} is None!')
+                else:
+                    errors_ret[name] = float(getattr(self, 'loss_' + name))  # float(...) works for both scalar tensor and float number
         return errors_ret
 
     def save_smallest_network(self):
@@ -233,8 +236,8 @@ class BaseModel(ABC):
             if isinstance(name, str):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 if self.opt.isTrain and self.opt.pretrained_name is not None:
-                        self.join = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
-                        load_dir = self.join
+                        join_ = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
+                        load_dir = join_
                 else:
                     load_dir = self.opt.load_init_models
 
@@ -253,16 +256,19 @@ class BaseModel(ABC):
                 # for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
                 #    self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
                 print(f"name {name}")
-                model = self.get_model(name)
                 pre_params = state_dict
-                new_params = model.state_dict()
+                new_params = net.state_dict()
 
                 for key in new_params:
                     if key in pre_params:
                         if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
                             new_params[key] = pre_params[key]
+                        else:
+                            print(f'shape does not match for {key} in model {name}')
+                    else:
+                        print(f'{key} from saved model does not exist in model {name}')
 
-                model.load_state_dict(new_params)
+                net.load_state_dict(new_params)
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture
