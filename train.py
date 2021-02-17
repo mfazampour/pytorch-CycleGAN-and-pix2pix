@@ -23,14 +23,12 @@ if __name__ == '__main__':
         base_path = get_data_paths()
         print("You are running on the cluster :)")
         opt.dataroot = base_path['data1'] + opt.dataroot
-        print(opt.dataroot )
         opt.checkpoints_dir = get_outputs_path()
         opt.display_id = -1  # no visdom available on the cluster
         parser.print_options(opt)
     except Exception as e:
         print(e)
         print("You are Running on the local Machine")
-        opt.dataroot = opt.dataroot
 
     dataset = create_dataset(opt, to_validate=False)  # create a dataset given opt.dataset_mode and other options
     dataset_val = create_dataset(opt, to_validate=True)  # validation dataset
@@ -76,9 +74,6 @@ if __name__ == '__main__':
                 model.setup(opt)  # regular setup: load and print networks; create schedulers
                 model.parallelize()
             model.set_input(data)  # unpack data from dataset and apply preprocessing
-            import gc
-
-
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
             if len(opt.gpu_ids) > 0:
@@ -116,8 +111,6 @@ if __name__ == '__main__':
             model.save_networks('latest')
             model.save_networks(epoch)
 
-        print("---------- Print out GPU memory every epoch----------")
-        print(torch.cuda.memory_allocated())
         print('End of epoch %d / %d \t Time Taken: %d sec' % (
             epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
         model.update_learning_rate(epoch=epoch)  # update learning rates at the end of every epoch.
