@@ -147,6 +147,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
             self.transformer = vxm.layers.SpatialTransformer((1,1,80,80,80))
+            #resize = vxm.layers.ResizeTransform(0.5, 1)
 
         self.first_phase_coeff = 1
 
@@ -304,7 +305,6 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         fixed = fixed * 0.5 + 0.5
-        print(f"shape fake_B {(self.fake_B).shape}  and shape fixed: {fixed.shape}")
 
         def_reg_output = self.netDefReg(self.fake_B * 0.5 + 0.5, fixed, registration=not self.isTrain)
 
@@ -313,11 +313,8 @@ class CUT3DMultiTaskModel(CUT3dModel):
         else:
             (self.deformed_fake_B, self.dvf) = def_reg_output
 
-        vxm.layers.ResizeTransform(self.dvf)
-        print(f"shape lm {(self.transformed_LM_B* 0.5 + 0.5).shape}  and shape dvf: {self.dvf.shape}")
-        self.deformed_landmarks_b = self.transformer(self.transformed_LM_B, self.dvf)
-        self.distance_deformed_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_A, self.deformed_landmarks_b,
-                                                                          self.deformed_landmarks_b.device)
+       # big_dvf = self.resize(self.dvf)
+
 
 
         if self.isTrain:
@@ -326,7 +323,11 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
         self.seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
-
+        self.deformed_landmarks_b = self.transformer_label(self.transformed_LM_B, self.dvf.detach())
+        self.distance_deformed_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_A,
+                                                                                   self.deformed_landmarks_b,
+                                                                                   self.deformed_landmarks_b.device)
+        print(f"distance: {self.distance_deformed_landmarks_b}")
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
 
