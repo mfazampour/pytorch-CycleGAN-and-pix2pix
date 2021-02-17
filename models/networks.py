@@ -1439,6 +1439,8 @@ class DiceLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, predict: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if len(target.unique()) != predict.shape[1]:  # the number of classes in target doesn't match the predict
+            return torch.tensor([-1.0], device=predict.device)
         if predict.shape[1] != target.shape[1]:
             target_ = target.view(target.shape[0], target.shape[1], -1)
             target_ = F.one_hot(target_.to(torch.int64))
@@ -1556,10 +1558,9 @@ class GradLoss(nn.Module):
 ##########################################################################
 
 class NCCLoss(nn.Module):
-    def __init__(self, win=None):
+    def __init__(self, s=4):
         super().__init__()
-        self.win = win
-        self.ncc_loss = vxm.losses.NCC(win=win)
+        self.ncc_loss = vxm.losses.LCC(s=4, device='cuda')
 
     def forward(self, y_true, y_pred):
         return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred)

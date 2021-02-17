@@ -127,9 +127,7 @@ if __name__ == '__main__':
                             model.log_tensorboard(writer, None, total_iters, save_gif=False, use_image_name=True)
                     keys = losses.keys()
                 for key in keys:
-                    sum_l = 0
-                    sum_l = [sum_l + losses[key] for losses in losses_total][0]
-                    loss_aggregate[key] = sum_l / len(losses_total)
+                    loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
                 for key in loss_aggregate:
                     writer.add_scalar(f'test-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
 
