@@ -148,12 +148,12 @@ class CUT3dModel(BaseModel):
         # update G
         self.set_requires_grad(self.netD, False)
         self.optimizer_G.zero_grad()
-        if self.opt.netF == 'mlp_sample':
+        if self.opt.lambda_NCE > 0.0 and self.opt.netF == 'mlp_sample':
             self.optimizer_F.zero_grad()
         self.loss_G = self.compute_G_loss()
         self.loss_G.backward()
         self.optimizer_G.step()
-        if self.opt.netF == 'mlp_sample':
+        if self.opt.lambda_NCE > 0.0 and self.opt.netF == 'mlp_sample':
             self.optimizer_F.step()
 
     def set_input(self, input):
@@ -174,8 +174,7 @@ class CUT3dModel(BaseModel):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         # Both real_B and real_A if we also use the loss from the identity mapping: NCE(G(Y), Y)) in NCE loss
 
-        self.real = torch.cat((self.real_A, self.real_B),
-                              dim=0) if self.opt.nce_idt and self.opt.isTrain else self.real_A
+        self.real = torch.cat((self.real_A, self.real_B), dim=0) if self.opt.nce_idt else self.real_A
 
         # Inspired by GcGAN, FastCUT is trained with flip-equivariance augmentation, where
         # the input image to the generator is horizontally flipped, and the output features
@@ -229,6 +228,7 @@ class CUT3dModel(BaseModel):
             self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B)
             loss_NCE_both = (self.loss_NCE + self.loss_NCE_Y) * 0.5
         else:
+            self.loss_NCE_Y = 0.0
             loss_NCE_both = self.loss_NCE
 
         self.loss_G = self.loss_G_GAN + loss_NCE_both
