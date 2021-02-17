@@ -63,10 +63,13 @@ class SegmentationModel(BaseModel):
         """
         self.data_A = input['A'].to(self.device)
         self.mask_A = input['A_mask'].to(self.device).type(self.data_A.dtype)
+        self.image_paths = input['A_paths']
 
     def forward(self):
         """Run forward pass. This will be called by both functions <optimize_parameters> and <test>."""
         self.seg_A = self.netG(self.data_A)
+        if not self.isTrain:
+            self.seg_A = torch.argmax(self.seg_A, dim=1, keepdim=True)
 
     def backward(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
