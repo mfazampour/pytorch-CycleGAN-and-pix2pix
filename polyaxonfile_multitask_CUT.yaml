@@ -31,7 +31,7 @@ environment:
     nvidiaDriver: "450"
 
 params:
-  dataroot: "/Prostate_Reg_KM/anonymized"
+  dataroot: "/Prostate_Reg_KM/anonymized_cleaned/"
   dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
@@ -54,19 +54,19 @@ params:
   train_fold: "train/"
   load_mask: True
   display_id: -1
-  load_init_models: "/data/Prostate_Reg_KM/multitask/init_weights_cut_2/"
+  load_init_models: "/data/Prostate_Reg_KM/multitask/init_weights_cut_full_epoch_50/"
   epochs_before_reg: 0
-  epoch: init
+  epoch: latest
   netReg: "NormalNet"
   netSeg: "unet_small"
   n_blocks_global: 9
-  n_blocks_local:3
+  n_blocks_local: 3
   ngf: 24
-
+  vxm_iteraton_steps: 5
 
 
 run:
-    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }}\
                                     --dataroot={{ dataroot }} \
                                     --dataset_mode={{ dataset_mode }} \
                                     --output_nc={{ output_nc }} \
@@ -93,8 +93,8 @@ run:
                                     --display_id={{ display_id }} \
                                     --n_blocks_global={{ n_blocks_global }} \
                                     --n_blocks_local={{ n_blocks_local }} \
-                                    --ngf={{ n/f }} \
+                                    --ngf={{ ngf }} \
                                     --continue_train \
-                                    --netReg {{ netReg }} \
-                                    --netSeg  {{ netSeg }} \
+                                    --netReg={{ netReg }} \
+                                    --netSeg={{ netSeg }} \
                                     --reg_idt_B

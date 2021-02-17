@@ -35,7 +35,7 @@ params:
   dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
-  lr: 0.000001
+  lr: 0.0002
   lr_Def: 0.0001
   lr_Seg: 0.0001
   lr_Reg: 0.0001
@@ -57,6 +57,9 @@ params:
   load_init_models: "/data/Prostate_Reg_KM/multitask/init_weights_cut_2/"
   epochs_before_reg: 1000
   epoch: init
+  n_blocks_global: 9
+  n_blocks_local: 3
+  ngf: 32
  
 
 
@@ -80,7 +83,10 @@ run:
                                     --val_fold={{ val_fold }} \ 
                                     --train_fold={{ train_fold }} \ 
                                     --load_mask={{ load_mask }} \ 
+                                    --n_blocks_global={{ n_blocks_global }} \
                                     --load_init_models={{ load_init_models }} \
+                                    --n_blocks_local={{ n_blocks_local }} \
+                                    --ngf={{ ngf }} \
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
                                     --continue_train \

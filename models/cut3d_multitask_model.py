@@ -7,6 +7,7 @@ from .patchnce import PatchNCELoss
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from torchgeometry.losses import dice_loss
 
 from util import affine_transform
 from util import distance_landmarks
@@ -145,6 +146,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
+            self.transformer = vxm.layers.SpatialTransformer((1,1,80,80,80))
 
         self.first_phase_coeff = 1
 
@@ -302,11 +304,21 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         fixed = fixed * 0.5 + 0.5
+        print(f"shape fake_B {(self.fake_B).shape}  and shape fixed: {fixed.shape}")
+
         def_reg_output = self.netDefReg(self.fake_B * 0.5 + 0.5, fixed, registration=not self.isTrain)
+
         if self.opt.bidir:
             (self.deformed_fake_B, self.deformed_B, self.dvf) = def_reg_output
         else:
             (self.deformed_fake_B, self.dvf) = def_reg_output
+
+        vxm.layers.ResizeTransform(self.dvf)
+        print(f"shape lm {(self.transformed_LM_B* 0.5 + 0.5).shape}  and shape dvf: {self.dvf.shape}")
+        self.deformed_landmarks_b = self.transformer(self.transformed_LM_B, self.dvf)
+        self.distance_deformed_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_A, self.deformed_landmarks_b,
+                                                                          self.deformed_landmarks_b.device)
+
 
         if self.isTrain:
             self.dvf = self.resizer(self.dvf)
@@ -318,7 +330,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
 
-      #  self.loss_G_NCE = self.compute_G_loss()
+        self.loss_G_NCE = self.compute_G_loss()
 
         # Third, rigid registration
         loss_G_Reg = self.criterionRigidReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
@@ -331,7 +343,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
         # fifth, segmentation
         loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
-
+        #self.loss_Dice = loss_G_Seg
         # combine loss and calculate gradients
         self.loss_G = self.loss_G_NCE * self.first_phase_coeff + \
                       loss_DefReg_fake * (1 - self.first_phase_coeff) + \
@@ -447,7 +459,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
                                                                      self.reg_B_params.detach()),
                                                                  device=self.transformed_LM_B.device)
 
-        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
+        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_A, self.transformed_LM_B,
                                                                           self.transformed_LM_B.device)
 
         self.diff_A = reg_A - self.transformed_B
@@ -562,4 +574,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Def. mask overlay', cmap=None)
         writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
 
-        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
+        writer.add_scalar('landmarks/rigid', scalar_value=self.distance_landmarks_b, global_step=global_step)
+        writer.add_scalar('landmarks/def', scalar_value=self.distance_deformed_landmarks_b, global_step=global_step)
+
+

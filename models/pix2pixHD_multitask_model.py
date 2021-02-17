@@ -15,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 from models import networks
 from models import networks3d
+from torchgeometry import losses
 #from .cut3d_model import CUT3dModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
@@ -130,7 +131,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         # HD
         self.input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc
         # Generator network
-        self.netG_input_nc = 81
+        self.netG_input_nc = 36
         if self.isTrain:
             self.use_sigmoid = opt.no_lsgan
             self.netD_input_nc = self.netG_input_nc + 1
@@ -159,6 +160,7 @@ class pix2pixHDMultitaskModel(BaseModel):
             self.optimizers.append(self.optimizer_DefReg)
 
             self.criterionSeg = networks.DiceLoss()
+          #  self.criterionSeg = losses.dice()
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
             self.distance_landmarks_b = 0
@@ -173,6 +175,8 @@ class pix2pixHDMultitaskModel(BaseModel):
             # optimizer D
             params = list(self.netD.parameters())
             self.optimizer_D = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizers.append(self.optimizer_G)
+            self.optimizers.append(self.optimizer_D)
 
             # pix2pixHD
             if opt.pool_size > 0 and (len(self.gpu_ids)) > 1:
@@ -257,7 +261,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         if self.isTrain:
             self.model_names = ['G', 'E','D', 'RigidReg', 'DefReg', 'Seg']
         else:  # during test time, only load G
-            self.model_names = ['G', 'E' ,'RigidReg', 'DefReg', 'Seg']
+            self.model_names = ['G', 'E','RigidReg', 'DefReg', 'Seg']
 
         # We are using DenseNet for rigid registration -- actually DenseNet didn't provide any performance improvement
         # TODO change this to obelisk net
@@ -295,31 +299,32 @@ class pix2pixHDMultitaskModel(BaseModel):
 
         # pix2pixHD
 
-        self.netG = networks3d.define_G(input_nc=self.netG_input_nc, output_nc=opt.output_nc, ngf=opt.ngf, netG=opt.netG,
-                                      n_downsample_global= opt.n_downsample_global, n_blocks_global=opt.n_blocks_global, n_local_enhancers=opt.n_local_enhancers,
-                                      n_blocks_local=opt.n_blocks_local,norm= opt.norm, gpu_ids=self.gpu_ids)
+        self.netG = networks3d.define_G(input_nc=self.netG_input_nc, output_nc=opt.output_nc, ngf=opt.ngf,
+                                        netG=opt.netG,
+                                        n_downsample_global=opt.n_downsample_global,
+                                        n_blocks_global=opt.n_blocks_global, n_local_enhancers=opt.n_local_enhancers,
+                                        n_blocks_local=opt.n_blocks_local, norm=opt.norm, gpu_ids=self.gpu_ids)
 
         self.netD = networks3d.define_D_HD(self.netD_input_nc, opt.ndf, opt.n_layers_D, opt.norm, self.use_sigmoid,
-                                      opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
-        self.netE = networks3d.define_G(input_nc=opt.output_nc, output_nc= opt.feat_num, ngf=opt.nef, netG='encoder',
-                                      n_downsample_global=opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)
+                                           opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
+        self.netE = networks3d.define_G(input_nc=opt.output_nc, output_nc=opt.feat_num, ngf=opt.nef, netG='encoder',
+                                        n_downsample_global=opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)
 
     def set_visdom_names(self):
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
         # Names so we can breakout loss
-        self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
-        self.loss_names = [ 'G','RigidReg_fake', 'RigidReg_real']
+        self.loss_names = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
+        self.loss_names += [ 'G','RigidReg_fake', 'RigidReg_real']
         print("LOSS NAMES")
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
-        if self.opt.nce_idt and self.isTrain:
-            self.loss_names += ['NCE_Y']
+
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
 
-        #self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
-       # self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
-       # self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
+        self.visual_names = ['real_A_center_sag', 'real_A_center_cor', 'real_A_center_axi']
+        self.visual_names += ['fake_B_center_sag', 'fake_B_center_cor', 'fake_B_center_axi']
+        self.visual_names += ['real_B_center_sag', 'real_B_center_cor', 'real_B_center_axi']
 
         # rigid registration
         self.visual_names += ['diff_A_center_sag', 'diff_A_center_cor', 'diff_A_center_axi']
@@ -447,15 +452,15 @@ class pix2pixHDMultitaskModel(BaseModel):
         ########   pix2pix HD    ########
         # Fake Detection and Loss
 
-        pred_fake_pool = self.discriminate(self.mask_A, self.fake_B, use_pool=True)
+        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, use_pool=True)
         self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
 
         # Real Detection and Loss
-        pred_real = self.discriminate(self.mask_A, self.real_A)
+        pred_real = self.discriminate(self.input_cat, self.real_B)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
         # GAN loss (Fake Passability Loss)
-        pred_fake = self.netD.forward(torch.cat((self.mask_A, self.fake_B), dim=1))
+        pred_fake = self.netD.forward(torch.cat((self.input_cat, self.fake_B), dim=1))
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
         # GAN feature matching loss
@@ -466,16 +471,15 @@ class pix2pixHDMultitaskModel(BaseModel):
             for i in range(self.opt.num_D):
                 for j in range(len(pred_fake[i]) - 1):
                     self.loss_G_GAN_Feat += D_weights * feat_weights * \
-                                       self.criterionFeat(pred_fake[i][j],
-                                                          pred_real[i][j].detach()) * self.opt.lambda_feat
-        losses = self.loss_filter( self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_D_real, self.loss_D_fake )
+                                            self.criterionFeat(pred_fake[i][j],
+                                                               pred_real[i][j].detach()) * self.opt.lambda_feat
+        losses = self.loss_filter(self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_D_real, self.loss_D_fake)
         self.losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
         self.loss_dict = dict(zip(self.losses_pix2pix, self.losses))
-        self.loss_pix2pix = self.loss_dict['G_GAN'] + self.loss_dict.get('G_GAN_Feat',0)
+
+        self.loss_pix2pix = self.loss_dict['G_GAN'] + self.loss_dict.get('G_GAN_Feat', 0)
 
         ########   END pix2pix HD    ########
-
-
 
         # Third, rigid registration
         loss_G_Reg = self.criterionRigidReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
@@ -490,23 +494,17 @@ class pix2pixHDMultitaskModel(BaseModel):
         loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
 
         # combine loss and calculate gradients
-     #   self.loss_G = self.loss_pix2pix * self.first_phase_coeff + \
-     #                 loss_DefReg_fake * (1 - self.first_phase_coeff) + \
-     #                 loss_G_Seg * (1 - self.first_phase_coeff)
+        self.loss_G = self.loss_pix2pix * self.first_phase_coeff + \
+                      loss_DefReg_fake * (1 - self.first_phase_coeff) + \
+                      loss_G_Seg * (1 - self.first_phase_coeff)
 
-        self.loss_G = self.loss_pix2pix
-
-     #   if self.opt.use_rigid_branch:
-     #       self.loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
+        if self.opt.use_rigid_branch:
+            self.loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
 
         ############### Backward Pass ####################
-        # update generator weights
-
-
+        # update generator weight
 
         self.loss_G.backward()
-       # self.loss_pix2pix.backward()
-     #   print(f"{torch.cuda.memory_allocated()} backward G ")
 
 
 
@@ -602,14 +600,13 @@ class pix2pixHDMultitaskModel(BaseModel):
         # update deformable registration and segmentation network
         if (1 - self.first_phase_coeff) == 0:
             return
-        #self.set_requires_grad(self.netDefReg, True)
-        #self.set_requires_grad(self.netSeg, True)
-        #self.optimizer_DefReg.zero_grad()
-        #self.optimizer_Seg.zero_grad()
-        #self.bacward_DefReg_Seg()
-        #self.optimizer_DefReg.step()
-        #self.optimizer_Seg.step()
-       # print(f"{torch.cuda.memory_allocated()} optimize parameters")
+        self.set_requires_grad(self.netDefReg, True)
+        self.set_requires_grad(self.netSeg, True)
+        self.optimizer_DefReg.zero_grad()
+        self.optimizer_Seg.zero_grad()
+        self.bacward_DefReg_Seg()
+        self.optimizer_DefReg.step()
+        self.optimizer_Seg.step()
 
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:

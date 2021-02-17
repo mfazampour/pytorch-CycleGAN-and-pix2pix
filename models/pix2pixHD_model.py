@@ -121,13 +121,13 @@ class pix2pixHDModel(BaseModel):
         # HD
         self.input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc
         # Generator network
-        self.netG_input_nc = 35
+        self.netG_input_nc = 36
         if self.isTrain:
             self.use_sigmoid = opt.no_lsgan
             self.netD_input_nc = self.netG_input_nc + 1
             if not opt.no_instance:
                 self.netD_input_nc += 1
-
+#
         self.use_features = opt.instance_feat or opt.label_feat
         self.gen_features = self.use_features and not self.opt.load_features
 
@@ -257,7 +257,7 @@ class pix2pixHDModel(BaseModel):
         # <BaseModel.get_current_losses>
         # Names so we can breakout loss
         self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
-        self.loss_names = ['G']
+        self.loss_names = ['G','G_GAN_Feat','G_GAN', 'D_real', 'D_fake']
     def name(self):
         return 'Pix2PixHDModel'
 
@@ -316,8 +316,9 @@ class pix2pixHDModel(BaseModel):
         # Encode Inputs
         self.input_label, inst_map, real_image, feat_map = self.encode_input(label_map=self.mask_A, inst_map=None,
                                                                              real_image=self.real_B, feat_map=None)
-        self.fake_B = self.netG.forward(self.input_label)
-
+        self.input_cat = torch.cat((self.input_label, self.real_A), dim=1)
+        self.fake_B = self.netG.forward(self.input_cat)
+#
 
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
@@ -325,15 +326,15 @@ class pix2pixHDModel(BaseModel):
         ########   pix2pix HD    ########
         # Fake Detection and Loss
 
-        pred_fake_pool = self.discriminate(self.input_label, self.fake_B, use_pool=True)
+        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, use_pool=True)
         self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
 
         # Real Detection and Loss
-        pred_real = self.discriminate(self.input_label, self.real_B)
+        pred_real = self.discriminate(self.input_cat, self.real_B)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
         # GAN loss (Fake Passability Loss)
-        pred_fake = self.netD.forward(torch.cat((self.input_label, self.fake_B), dim=1))
+        pred_fake = self.netD.forward(torch.cat((self.input_cat, self.fake_B), dim=1))
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
         # GAN feature matching loss
@@ -349,6 +350,7 @@ class pix2pixHDModel(BaseModel):
         losses = self.loss_filter(self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_D_real, self.loss_D_fake)
         self.losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
         self.loss_dict = dict(zip(self.losses_pix2pix, self.losses))
+
         self.loss_pix2pix = self.loss_dict['G_GAN'] + self.loss_dict.get('G_GAN_Feat', 0)
 
         ########   END pix2pix HD    ########
@@ -360,12 +362,6 @@ class pix2pixHDModel(BaseModel):
     def backward_D(self):
         self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
         self.loss_D.backward()
-
-    #    print(f"{torch.cuda.memory_allocated()} backward D")
-
-    #
-
-
 
 
     def optimize_parameters(self):
