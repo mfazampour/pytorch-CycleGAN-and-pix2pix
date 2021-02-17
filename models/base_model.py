@@ -1,4 +1,6 @@
+import inspect
 import os
+from inspect import getmembers, isfunction
 import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
@@ -41,6 +43,7 @@ class BaseModel(ABC):
         self.visual_names = []
         self.optimizers = []
         self.image_paths = []
+        self.loss_functions = []
         self.metric = 0  # used for learning rate policy 'plateau'
         self.min_Ganloss = 1000.0
         self.Tensor = torch.cuda.FloatTensor if self.gpu_ids else torch.Tensor
@@ -170,7 +173,10 @@ class BaseModel(ABC):
         errors_ret = OrderedDict()
         for name in self.loss_names:
             if isinstance(name, str):
-                errors_ret[name] = float(getattr(self, 'loss_' + name))  # float(...) works for both scalar tensor and float number
+                if getattr(self, 'loss_' + name) is None:
+                    print(f'loss_{name} is None!')
+                else:
+                    errors_ret[name] = float(getattr(self, 'loss_' + name))  # float(...) works for both scalar tensor and float number
         return errors_ret
 
     def save_smallest_network(self):
@@ -230,20 +236,20 @@ class BaseModel(ABC):
             epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
         """
         for name in self.model_names:
-            if name not in ['G','D','E']:
-                if isinstance(name, str):
-                    load_filename = '%s_net_%s.pth' % (epoch, name)
-                    if self.opt.isTrain and self.opt.pretrained_name is not None:
-                            self.join = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
-                            load_dir = self.join
-                    else:
-                        load_dir = self.opt.load_init_models
 
-                    load_path = os.path.join(load_dir, load_filename)
-                    net = getattr(self, 'net' + name)
-                    if isinstance(net, torch.nn.DataParallel):
-                        net = net.module
-                    print('loading the model from %s' % load_path)
+            if isinstance(name, str):
+                load_filename = '%s_net_%s.pth' % (epoch, name)
+                if self.opt.isTrain and self.opt.pretrained_name is not None:
+                        join_ = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
+                        load_dir = join_
+                else:
+                    load_dir = self.opt.load_init_models
+
+                load_path = os.path.join(load_dir, load_filename)
+                net = getattr(self, 'net' + name)
+                if isinstance(net, torch.nn.DataParallel):
+                    net = net.module
+                print('loading the model from %s' % load_path)
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
                     state_dict = torch.load(load_path, map_location=str(self.device))
@@ -253,17 +259,21 @@ class BaseModel(ABC):
                 # patch InstanceNorm checkpoints prior to 0.4
                 # for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
                 #    self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
-                    print(f"name {name}")
-                    model = self.get_model(name)
-                    pre_params = state_dict
-                    new_params = model.state_dict()
 
-                    for key in new_params:
-                        if key in pre_params:
-                            if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
-                                new_params[key] = pre_params[key]
+                print(f"name {name}")
+                pre_params = state_dict
+                new_params = net.state_dict()
 
-                    model.load_state_dict(new_params)
+                for key in new_params:
+                    if key in pre_params:
+                        if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
+                            new_params[key] = pre_params[key]
+                        else:
+                            print(f'shape does not match for {key} in model {name}')
+                    else:
+                        print(f'{key} from saved model does not exist in model {name}')
+
+                net.load_state_dict(new_params)
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture
@@ -300,3 +310,12 @@ class BaseModel(ABC):
         return {}
 
 
+    def calculate_loss_values(self):
+        """Can generate the loss values without calling optimize. Use it only after calling forward().
+        Created only for testing
+        Returns
+        -------
+
+        """
+        for fun in self.loss_functions:
+            getattr(self, fun)()

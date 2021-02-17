@@ -30,8 +30,9 @@ if __name__ == '__main__':
         print(e)
         print("You are Running on the local Machine")
 
-    dataset = create_dataset(opt, to_validate=False)  # create a dataset given opt.dataset_mode and other options
-    dataset_val = create_dataset(opt, to_validate=True)  # validation dataset
+    dataset = create_dataset(opt, mode='train')  # create a dataset given opt.dataset_mode and other options
+    dataset_val = create_dataset(opt, mode='validation')  # validation dataset
+    dataset_test = create_dataset(opt, mode='test')
     dataset_size = len(dataset)  # get the number of images in the dataset.
 
     model = create_model(opt)  # create a model given opt.model and other options
@@ -41,7 +42,7 @@ if __name__ == '__main__':
     opt.visualizer = visualizer
     total_iters = 0  # the total number of training iterations
 
-    optimize_time = 0.1
+    optimize_time = -1
 
     times = []
     opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
@@ -78,7 +79,8 @@ if __name__ == '__main__':
 
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
-            optimize_time = (time.time() - optimize_start_time) / batch_size * 0.005 + 0.995 * optimize_time
+            new_time = (time.time() - optimize_start_time) / batch_size
+            optimize_time = new_time * 0.5 if optimize_time == -1 else new_time * 0.02 + 0.98 * optimize_time
 
             model.save_smallest_network()
             if total_iters % opt.print_freq == 0:  # print training losses and save logging information to the disk
@@ -95,7 +97,7 @@ if __name__ == '__main__':
                 save_result = total_iters % opt.update_html_freq == 0
                 visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
                 if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard(writer, losses, total_iters)
+                    model.log_tensorboard(writer, losses, total_iters, save_gif=False)
                 model.train()  # change networks back to train mode
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
@@ -103,6 +105,31 @@ if __name__ == '__main__':
                 print(opt.name)  # it's useful to occasionally show the experiment name on console
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
+
+            if total_iters % opt.evalutate_freq == 0:
+                print('evaluating model on labeled data')
+                losses_total = []
+                keys = []
+                loss_aggregate = {}
+                for j, (test_data) in enumerate(dataset_test):
+                    if j >= 5:
+                        break
+                    model.eval()  # change networks to eval mode
+                    with torch.no_grad():
+                        model.set_input(test_data)  # unpack data from data loader
+                        model.forward()  # run inference
+                        model.calculate_loss_values()  # get the loss values
+                        model.compute_visuals()
+                        losses = model.get_current_losses()
+                        losses_total.append(losses)
+                        model.get_current_visuals()
+                        if hasattr(model, 'log_tensorboard'):
+                            model.log_tensorboard(writer, None, total_iters, save_gif=False, use_image_name=True)
+                    keys = losses.keys()
+                for key in keys:
+                    loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
+                for key in loss_aggregate:
+                    writer.add_scalar(f'test-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
 
             iter_data_time = time.time()
 

@@ -12,6 +12,8 @@ from models import create_model
 from models.pix2pix3d_model import Pix2Pix3dModel
 from models.pix2pix3d_seg_model import Pix2Pix3dSegModel
 from models.pix2pix3d_reg_model import Pix2Pix3dRegModel
+from models.segmentation_model import SegmentationModel
+from models.cut3d_model import CUT3dModel
 from util.visualizer import save_images
 from util import html
 from data.volume_dataset import VolumeDataset
@@ -34,7 +36,7 @@ class VolumeTestOptions(BaseOptions):
         parser.add_argument('--phase', type=str, default='test', help='train, val, test, etc')
         # Dropout and Batchnorm has different behavioir during training and test.
         parser.add_argument('--eval', action='store_true', help='use eval mode during test time.')
-        parser.add_argument('--num_test', type=int, default=100, help='how many test images to run')
+        parser.add_argument('--num_test', type=int, default=100, help='how many test images to run, set -1 to run all')
         parser.add_argument('--plot_result', type=bool, default=False, help='flag to plot the images when running')
         parser.add_argument('--num_of_channels', type=int, default=1,
                             help='number of channels expected in the output image. '
@@ -42,6 +44,8 @@ class VolumeTestOptions(BaseOptions):
                                  ' average over the channels in z direction should be calculated.'
                                  'should be an odd number')
         parser.add_argument('--patients_dir', type=str, default='./datasets/patients', help='source folder of patients')
+        parser.add_argument('--output_name', type=str, default='fake_US', help='name of output image')
+        parser.add_argument('--store_with_original', action='store_true', help='save in the original image folder')
 
         # rewrite devalue values
         parser.set_defaults(model='test')
@@ -51,49 +55,41 @@ class VolumeTestOptions(BaseOptions):
         return parser
 
 
-def compound_volume(slices, opt, patient_name: str):
-    resized = []
-    for slice_ in slices:
-        resized.append(Image.fromarray(slice_.squeeze()).resize(opt.orig_size, Image.ANTIALIAS))
-    resized = np.stack(resized, axis=0)
-    vol = sitk.GetImageFromArray(resized)
-    vol.SetSpacing(opt.res)
-    path = opt.results_dir + f'volumes/fake_{patient_name}.mhd'
-    dir_ = os.path.dirname(path)
-    if not os.path.isdir(dir_):
-        os.makedirs(dir_)
-    sitk.WriteImage(vol, opt.results_dir + f'volumes/fake_{patient_name}.mhd')
-
-
-def slices_from_multichannel(fake_slices, opt):
-    averaged_slices = []
-    for i in range(len(fake_slices)):
-        fake_single_slice = []
-        start_idx = int(np.max([0, i - (opt.num_of_channels - 1) / 2]))
-        end_idx = int(np.min([len(fake_slices), i + (opt.num_of_channels + 1) / 2]))
-        for idx in range(start_idx, end_idx):
-            fake_single_slice.append(fake_slices[idx][:, :, i - start_idx])
-        # averaged_slices.append(np.mean(np.stack(fake_single_slice, axis=2), axis=2))
-        averaged_slices.append(np.median(np.stack(fake_single_slice, axis=2), axis=2))
-    return averaged_slices
-
-
-def save_network_output(fake_volume, opt, idx, patient_name):
-    fake_volume = np.split(fake_volume, fake_volume.shape[2], axis=2)
-    compound_volume(fake_volume, opt, f'{patient_name}/chunk_{idx}')
-
-
 def save_image(vol, file_name, transform):
     vol = transform(vol)
     vol = np.squeeze(vol)
     vol = np.transpose(vol, axes=[2, 1, 0])
     vol = sitk.GetImageFromArray(vol)
     vol.SetSpacing(opt.res)
-    path = opt.results_dir + file_name
+    path = os.path.join(opt.results_dir, file_name)
     dir_ = os.path.dirname(path)
     if not os.path.isdir(dir_):
         os.makedirs(dir_)
     sitk.WriteImage(vol, path)
+    return path
+
+
+def copy_transformation(src, dst):
+    with open(src, 'r') as f:
+        lines = f.readlines()
+        pos = [line for line in lines if 'Position' in line]
+        ori = [line for line in lines if 'Orientation' in line]
+    if len(pos) == 0 or len(ori) == 0:
+        print(f'warning: can not find tags for pos/ori for image {src}')
+        return
+    pos = pos[0]
+    ori = ori[0]
+    with open(dst, 'r+') as f:
+        lines = f.readlines()
+        reduced = [line for line in lines if
+                   'Position' not in line and
+                   'Orientation' not in line and
+                   'Transform' not in line and
+                   'Offset' not in line]
+        reduced.append(pos)
+        reduced.append(ori)
+    with open(dst, 'w') as f:
+        f.writelines(reduced)
 
 
 if __name__ == '__main__':
@@ -115,45 +111,58 @@ if __name__ == '__main__':
     if opt.eval:
         model.eval()
 
-    assert np.mod(opt.num_of_channels, 2) == 1, "num of channels should be an odd number, (for simplicity)"
-
     dataset = create_dataset(opt)
 
     print(len(dataset))
     transform_img = VolumeDataset(opt).reverse_resample(min_value=-1)
     transform_label = VolumeDataset(opt).reverse_resample(min_value=0)
-    assert isinstance(model, Pix2Pix3dModel), 'not the right type of model'
+    # assert isinstance(model, Pix2Pix3dModel), 'not the right type of model'
     for i, data in enumerate(dataset):
-        if i >= opt.num_test:  # only apply our model to opt.num_test images.
+        if opt.num_test != -1 and i >= opt.num_test:  # only apply our model to opt.num_test images.
             break
         model.set_input(data)  # unpack data from data loader
         model.test()  # run inference
         visuals = model.get_current_visuals()  # get image results
-        img_path = model.get_image_paths()  # get image paths
+        img_path = data['A_paths'][0]  # get image paths
         patient_name = data['Patient'][0]
-        file_name = f'volumes/{patient_name}_fake_US.mhd'
-        vol = model.fake_B.cpu().squeeze(dim=0).numpy()
-        save_image(vol, file_name, transform_img)
-        if isinstance(model, Pix2Pix3dSegModel):
-            # store the segmentations too
-            vol = F.softmax(model.seg_B, dim=1)[:, 1, ...].cpu().numpy()
-            vol = vol >= 0.5
-            file_name = f'volumes/{patient_name}_fake_seg.mhd'
-            save_image(vol, file_name, transform_label)
+        if opt.store_with_original:
+            opt.results_dir = os.path.dirname(img_path)
+            file_name = f'{opt.output_name}.mhd'
+        else:
+            file_name = f'volumes/{patient_name}_{opt.output_name}.mhd'
 
-            vol = F.softmax(model.seg_A, dim=1)[:, 1, ...].cpu().numpy()
-            vol = vol >= 0.5
-            file_name = f'volumes/{patient_name}_real_seg.mhd'
-            save_image(vol, file_name, transform_label)
+        # vol = model.seg_A if isinstance(model, SegmentationModel) else model.fake_B
+        # vol = vol.cpu().squeeze(dim=0).numpy()
+        if isinstance(model, SegmentationModel):
+            vol = model.seg_A.cpu().squeeze(dim=0).numpy()
+            dst = save_image(vol, file_name, transform_label)
+            copy_transformation(img_path, dst)
 
-        if isinstance(model, Pix2Pix3dRegModel):
-            # check the values for registration parameters
-            gt_vector = model.gt_vector.cpu()
-            est_vector = model.reg_B_params.detach().cpu()
-            loss_ = loss(est_vector, gt_vector)
-            print(f'for patient {patient_name} registration loss is {loss_}')
-            reg_A, reg_B = model.get_transformed_images()
-            file_name = f'volumes/{patient_name}_original_registered.mhd'
-            save_image(reg_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
-            file_name = f'volumes/{patient_name}_transformed.mhd'
-            save_image(model.transformed_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
+        if isinstance(model, Pix2Pix3dModel) or isinstance(model, CUT3dModel):
+            vol = model.fake_B.cpu().squeeze(dim=0).numpy()
+            dst = save_image(vol, file_name, transform_img)
+            copy_transformation(img_path, dst)
+
+            if isinstance(model, Pix2Pix3dSegModel):
+                # store the segmentations too
+                vol = F.softmax(model.seg_B, dim=1)[:, 1, ...].cpu().numpy()
+                vol = vol >= 0.5
+                file_name = f'volumes/{patient_name}_fake_seg.mhd'
+                save_image(vol, file_name, transform_label)
+
+                vol = F.softmax(model.seg_A, dim=1)[:, 1, ...].cpu().numpy()
+                vol = vol >= 0.5
+                file_name = f'volumes/{patient_name}_real_seg.mhd'
+                save_image(vol, file_name, transform_label)
+
+            if isinstance(model, Pix2Pix3dRegModel):
+                # check the values for registration parameters
+                gt_vector = model.gt_vector.cpu()
+                est_vector = model.reg_B_params.detach().cpu()
+                loss_ = loss(est_vector, gt_vector)
+                print(f'for patient {patient_name} registration loss is {loss_}')
+                reg_A, reg_B = model.get_transformed_images()
+                file_name = f'volumes/{patient_name}_original_registered.mhd'
+                save_image(reg_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
+                file_name = f'volumes/{patient_name}_transformed.mhd'
+                save_image(model.transformed_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)

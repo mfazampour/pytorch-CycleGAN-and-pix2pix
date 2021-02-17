@@ -59,21 +59,18 @@ class VolumeDataset(BaseDataset):
         parser.add_argument('--origshape', type=int, nargs='+', default=[80] * 3,
                             help='original shape of input images')
         parser.add_argument('--min_size', type=int, default=80, help='minimum length of the axes')
+        parser.add_argument('--transforms', nargs='+', default=[],
+                            help='list of possible augmentations, currently [flip, affine]')
         return parser
 
-    def __init__(self, opt, to_validate=False):
+    def __init__(self, opt, mode=None):
         """Initialize this dataset class.
 
         Parameters:
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
-        BaseDataset.__init__(self, opt)
+        BaseDataset.__init__(self, opt, mode)
         self.opt = opt
-
-        if to_validate:
-            self.root = self.opt.dataroot + self.opt.val_fold
-        else:
-            self.root = self.opt.dataroot + self.opt.train_fold
 
         print(f'dataroot: {self.root}')
         self.load_mask = opt.load_mask
@@ -116,7 +113,14 @@ class VolumeDataset(BaseDataset):
 
         transforms.append(rescale)
 
-        # transforms = [rescale]
+        if self.mode == 'train':
+            # transforms = [rescale]
+            if 'affine' in self.opt.transforms:
+                transforms.append(RandomAffine(translation=5, p=0.8))
+
+            if 'flip' in self.opt.transforms:
+                transforms.append(RandomFlip(axes=(0, 2), p=0.8))
+
         # # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
         # # Also, there is a 25% chance that none of them will be applied
@@ -170,8 +174,13 @@ class VolumeDataset(BaseDataset):
             'B_landmark': landmarks_b,
         }
         if self.load_mask:
-            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]]
-
+            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
+            if 'trus_tree' in transformed_.keys():
+                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
+                dict_['B_mask_available'] = True
+            else:
+                dict_['B_mask'] = torch.zeros_like(dict_['A_mask'])
+                dict_['B_mask_available'] = False
         return dict_
 
     def load_subject_(self, index):
@@ -181,9 +190,15 @@ class VolumeDataset(BaseDataset):
         if sample not in self.subjects:
             # print(f'loading patient {sample}')
             if self.load_mask:
-                subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                          trus=torchio.ScalarImage(sample + "/trus.mhd"),
-                                          mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
+                if os.path.isfile(sample + "/trus_tree.mhd"):
+                    subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"),
+                                              trus_tree=torchio.LabelMap(sample + "/trus_tree.mhd"))
+                else:
+                    subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
             else:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
                                           trus=torchio.Image(sample + "/trus.mhd"))

@@ -44,17 +44,20 @@ def get_option_setter(dataset_name):
     return dataset_class.modify_commandline_options
 
 
-def create_dataset(opt, to_validate):
+def create_dataset(opt, mode=None):
     """Create a dataset given the option.
 
     This function wraps the class CustomDatasetDataLoader.
         This is the main interface between this package and 'train.py'/'test.py'
 
+    mode : can be one of None, 'train', 'validation' and 'test'
+
     Example:
         >>> from data import create_dataset
         >>> dataset = create_dataset(opt)
     """
-    data_loader = CustomDatasetDataLoader(opt, to_validate)
+
+    data_loader = CustomDatasetDataLoader(opt, mode)
     dataset = data_loader.load_data()
     return dataset
 
@@ -62,7 +65,7 @@ def create_dataset(opt, to_validate):
 class CustomDatasetDataLoader():
     """Wrapper class of Dataset class that performs multi-threaded data loading"""
 
-    def __init__(self, opt, to_validate):
+    def __init__(self, opt, mode):
         """Initialize this class
 
         Step 1: create a dataset instance given the name [dataset_mode]
@@ -70,7 +73,7 @@ class CustomDatasetDataLoader():
         """
         self.opt = opt
         dataset_class = find_dataset_using_name(opt.dataset_mode)
-        self.dataset = dataset_class(opt, to_validate=to_validate)
+        self.dataset = dataset_class(opt, mode=mode)
         print("dataset [%s] was created" % type(self.dataset).__name__)
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,

@@ -46,6 +46,7 @@ params:
   batch_size: 1
   epoch_count: 0
   n_epochs: 50
+  n_epochs_decay: 25
   netG: "resnet_cat"
   CUT_mode: "CUT"
   model: "cut3d_multitask"
@@ -81,6 +82,7 @@ run:
                                     --lr_decay_iters {{ lr_decay_iters }} \
                                     --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
+                                    --n_epochs_decay {{ n_epochs_decay }} \
                                     --netG={{ netG }} \ 
                                     --CUT_mode={{ CUT_mode }} \ 
                                     --model={{ model }} \ 
