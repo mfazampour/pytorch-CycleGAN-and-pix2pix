@@ -158,21 +158,21 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.optimizers.append(self.optimizer_Seg)
             self.loss_landmarks = 0
 
-        self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
+            self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
 
-    def get_model(self, name):
-        if name == "RigidReg":
-            return self.netRigidReg
-        if name == "DefReg":
-            return self.netDefReg
-        if name == "Seg":
-            return self.netSeg
-        if name == "G":
-            return self.netG
-        if name == 'F':
-            return self.netF
-        if name == 'D':
-            return self.netD
+    # def get_model(self, name):
+    #     if name == "RigidReg":
+    #         return self.netRigidReg
+    #     if name == "DefReg":
+    #         return self.netDefReg
+    #     if name == "Seg":
+    #         return self.netSeg
+    #     if name == "G":
+    #         return self.netG
+    #     if name == 'F':
+    #         return self.netF
+    #     if name == 'D':
+    #         return self.netD
 
     def set_networks(self, opt):
         # specify the models you want to save to the disk. The training/test scripts will call
@@ -327,7 +327,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         fixed = fixed * 0.5 + 0.5
         def_reg_output = self.netDefReg(self.fake_B * 0.5 + 0.5, fixed, registration=not self.isTrain)
-        if self.opt.bidir:
+        if self.opt.bidir and self.isTrain:
             (self.deformed_fake_B, self.deformed_B, self.dvf) = def_reg_output
         else:
             (self.deformed_fake_B, self.dvf) = def_reg_output
@@ -471,12 +471,16 @@ class CUT3DMultiTaskModel(CUT3dModel):
             shape[1] = n
             one_hot_fixed = torch.zeros(shape, device=self.device)
             one_hot_deformed = torch.zeros(shape, device=self.device)
+            one_hot_moving = torch.zeros(shape, device=self.device)
             for i in range(n):
                 one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
                 one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
-            self.loss_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+                one_hot_moving[:, i, self.mask_A[0, 0, ...] == i] = 1
+            self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+            self.loss_moving_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
         else:
-            self.loss_dice = None
+            self.loss_warped_dice = None
+            self.loss_moving_dice = None
 
     def compute_landmark_loss(self):
         self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
@@ -580,7 +584,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
 
 
     def add_deformable_figures(self, global_step, writer, use_image_name=False):
-        n = 8 if self.mask_B is None else 9
+        n = 8 if self.mask_B is None else 10
         axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
@@ -608,9 +612,14 @@ class CUT3DMultiTaskModel(CUT3dModel):
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
         if self.mask_B is not None:
             overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = self.mask_A.detach()
+            overlay[:, 2, ...] = 0
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask moving on US', cmap=None)
+
+            overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask MR-US overlay', cmap=None)
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[9, :], img_name='mask warped on US', cmap=None)
 
         if use_image_name:
             tag = f'{self.patient}/Deformable'
