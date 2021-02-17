@@ -10,14 +10,12 @@ import torch.nn.functional as F
 from .base_model import BaseModel
 from . import networks
 from . import networks3d
-from .patchnce import PatchNCELoss
 import util.util as util
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 
-#
 class DRIT3dModel(BaseModel):
     """ This class implements DRIT described in the paper
     DRIT++: Diverse image to image translation using disentangled representations
@@ -38,6 +36,7 @@ class DRIT3dModel(BaseModel):
         parser.add_argument('--n_layers_cont', type=int, default=3, help='number of layers of content encoder')
         parser.add_argument('--norm_cont', type=str, default='none', help='norm layer of content encoder')
         parser.add_argument('--lr_content', type=float, default=0.0001, help='learning rate of the content encoder')
+        parser.add_argument('--gan_mode_cont', type=str, default='vanilla', choices=['vanilla', 'lsgan', 'wgan', 'wgan-gp'], help='content gan adversarial loss')
         # attribute
         parser.add_argument('--output_nc_attr', type=int, default=16, help='output ch of attribute encoder')
         parser.add_argument('--ndf_attr', type=int, default=16, help='number of filters of attribute encoder')
@@ -78,10 +77,6 @@ class DRIT3dModel(BaseModel):
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
 
-        if len(self.gpu_ids) > 0:
-            self.gpu = self.gpu_ids[0]
-        else:
-            self.gpu = 'cpu'
         self.random_shape = None
 
         self.loss_names = ['G_GAN_A', 'G_GAN_B', 'G_GAN_Acontent', 'G_GAN_Bcontent', 'kl_za_a',
@@ -126,11 +121,13 @@ class DRIT3dModel(BaseModel):
             self.create_optimizers(opt)
 
             # Setup the loss function for training
-            self.criterion_cc = vxm.losses.LCC(s=opt.lcc_s,
-                                               device='cuda') if opt.recon_loss == 'lcc' else torch.nn.L1Loss().cuda()
-            self.l1 = torch.nn.L1Loss().cuda()
-            self.latent_l1 = torch.nn.L1Loss().cuda()
+            self.criterionCC = vxm.losses.LCC(s=opt.lcc_s,
+                                              device='cuda') if opt.recon_loss == 'lcc' else torch.nn.L1Loss().cuda()
+            self.criterionL1 = torch.nn.L1Loss().cuda()
             self.bce = torch.nn.BCEWithLogitsLoss().cuda()
+
+            self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)
+            self.criterionGAN_cont = networks.GANLoss(opt.gan_mode_cont).to(self.device)
 
     def create_optimizers(self, opt):
         lr = opt.lr
@@ -234,7 +231,7 @@ class DRIT3dModel(BaseModel):
 
     def get_z_random(self):
         z = torch.randn(self.random_shape)
-        return z.detach().to(self.gpu)
+        return z.detach().to(self.device)
 
     def compute_D_cont_loss(self):
         self.disContent_opt.zero_grad()
@@ -272,7 +269,13 @@ class DRIT3dModel(BaseModel):
         # update disContent
         self.compute_D_cont_loss()
 
-    def backward_D(self, netD, real, fake):
+    def backward_D(self, netD: torch.nn.Module, real: torch.Tensor, fake: torch.Tensor):
+        real_loss = self.criterionGAN(netD(real), target_is_real=True)
+        fake_loss = self.criterionGAN(netD(fake.detach()), target_is_real=True)
+        loss_netD = (real_loss + fake_loss) * 0.5
+        if self.gan_mode_cont == 'wgan-gp':
+            loss_gp = networks.wasserstein_gradient_penalty(netD, real, fake)
+            loss_netD += loss_gp
         loss_netD = self.discriminator_update_criterion(netD=netD, real=real, fake=fake, d_type=self.opt.d_loss)
         loss_netD.backward()
         return loss_netD
@@ -296,38 +299,18 @@ class DRIT3dModel(BaseModel):
         disc_real = disc_real.mean()
         disc_fake = disc_fake.mean()
 
-        gradient_penalty = self.wasserstein_gradient_penalty(netD=netD, real=real, fake=fake, g_lambda=g_lambda)
+        gradient_penalty = networks.wasserstein_gradient_penalty(netD=netD, real=real, fake=fake, g_lambda=g_lambda)
 
         disc_cost = disc_real - disc_fake + gradient_penalty
 
         return disc_cost
 
-    # Reference: https://github.com/jalola/improved-wgan-pytorch/blob/e664f47807105828c37258a74ee1508b6d9b667a/training_utils.py#L75
-    def wasserstein_gradient_penalty(self, netD=None, real=None, fake=None, g_lambda=None):
-        alpha = torch.rand(real.size(0), 1, 1, 1, 1)
-        alpha = alpha.expand(real.size())
-        alpha = alpha.to(self.gpu)
-
-        interpolates = alpha * real.detach() + ((1 - alpha) * fake.detach())
-
-        interpolates = interpolates.to(self.gpu)
-        interpolates.requires_grad_(True)
-
-        disc_interpolates = netD(interpolates)
-
-        gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
-                                        grad_outputs=torch.ones(disc_interpolates.size()).to(self.gpu),
-                                        create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * g_lambda
-        return gradient_penalty
-
     def minmax_dis_loss(self, netD=None, real=None, fake=None, lsgan_mode=False):
         out_a = netD(fake.detach())
         out_b = netD(real)
 
-        all0 = torch.zeros_like(out_a).cuda(self.gpu)
-        all1 = torch.ones_like(out_b).cuda(self.gpu)
+        all0 = torch.zeros_like(out_a).cuda(self.device)
+        all1 = torch.ones_like(out_b).cuda(self.device)
         if lsgan_mode:
             ad_fake_loss = F.mse_loss(out_a, all0)
             ad_true_loss = F.mse_loss(out_b, all1)
@@ -342,8 +325,8 @@ class DRIT3dModel(BaseModel):
         pred_fake = netD(img_a)
         pred_real = netD(img_b)
 
-        all0 = torch.zeros_like(pred_real).cuda(self.gpu).detach()
-        all1 = torch.ones_like(pred_fake).cuda(self.gpu).detach()
+        all0 = torch.zeros_like(pred_real).cuda(self.device).detach()
+        all1 = torch.ones_like(pred_fake).cuda(self.device).detach()
         ad_fake_loss = self.bce(pred_fake, all0)
         ad_true_loss = self.bce(pred_real, all1)
         loss_D = ad_true_loss + ad_fake_loss
@@ -388,16 +371,16 @@ class DRIT3dModel(BaseModel):
         loss_kl_zc_b = self._l2_regularize(self.zc_b) * self.opt.lambda_cont_reg
 
         # 3. CC loss
-        loss_cc_za_a = self.l1(self.za_a, self.z_attr_recon_a)
-        loss_cc_za_b = self.l1(self.za_b, self.z_attr_recon_b)
-        loss_cc_zc_a = self.l1(self.zc_a, self.z_content_recon_a)
-        loss_cc_zc_b = self.l1(self.zc_b, self.z_content_recon_b)
-        loss_G_CC_A = self.criterion_cc(self.fake_a_recon, self.real_a_encoded) * self.opt.lambda_cc
-        loss_G_CC_B = self.criterion_cc(self.fake_b_recon, self.real_b_encoded) * self.opt.lambda_cc
+        loss_cc_za_a = self.criterionL1(self.za_a, self.z_attr_recon_a)
+        loss_cc_za_b = self.criterionL1(self.za_b, self.z_attr_recon_b)
+        loss_cc_zc_a = self.criterionL1(self.zc_a, self.z_content_recon_a)
+        loss_cc_zc_b = self.criterionL1(self.zc_b, self.z_content_recon_b)
+        loss_G_CC_A = self.criterionCC(self.fake_a_recon, self.real_a_encoded) * self.opt.lambda_cc
+        loss_G_CC_B = self.criterionCC(self.fake_b_recon, self.real_b_encoded) * self.opt.lambda_cc
 
         # 4. Reconstruction loss
-        loss_G_CC_AA = self.criterion_cc(self.fake_aa_encoded, self.real_a_encoded) * self.opt.lambda_recon
-        loss_G_CC_BB = self.criterion_cc(self.fake_bb_encoded, self.real_b_encoded) * self.opt.lambda_recon
+        loss_G_CC_AA = self.criterionCC(self.fake_aa_encoded, self.real_a_encoded) * self.opt.lambda_recon
+        loss_G_CC_BB = self.criterionCC(self.fake_bb_encoded, self.real_b_encoded) * self.opt.lambda_recon
 
         loss_G = loss_G_GAN_A + loss_G_GAN_B + \
                  loss_G_CC_AA + loss_G_CC_BB + \
@@ -469,7 +452,7 @@ class DRIT3dModel(BaseModel):
 
     def minmax_gan_update(self, fake, netD=None, lsgan_mode=False):
         outs_fake = netD(fake)
-        all_ones = torch.ones_like(outs_fake).cuda(self.gpu)
+        all_ones = torch.ones_like(outs_fake).cuda(self.device)
         if lsgan_mode:
             loss_G = F.mse_loss(outs_fake, all_ones)
         else:

@@ -19,7 +19,7 @@ from voxelmorph import voxelmorph as vxm
 # Helper Functions
 ###############################################################################
 
-#
+
 def get_filter(filt_size=3):
     if(filt_size == 1):
         a = np.array([1., ])
@@ -320,6 +320,27 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
                     initialize_weights=('stylegan2' not in netD))
 
 
+# Reference: https://github.com/jalola/improved-wgan-pytorch/blob/e664f47807105828c37258a74ee1508b6d9b667a/training_utils.py#L75
+def wasserstein_gradient_penalty(netD: torch.nn.Module, real: torch.Tensor, fake: torch.Tensor, g_lambda=1.0):
+    ndims = len(real.shape) - 2
+    alpha = torch.rand(real.size(0), *([1]*(ndims + 1)))
+    alpha = alpha.expand(real.size())
+    alpha = alpha.to(real.device)
+
+    interpolates = alpha * real.detach() + ((1 - alpha) * fake.detach())
+
+    interpolates = interpolates.to(real.device)
+    interpolates.requires_grad_(True)
+
+    disc_interpolates = netD(interpolates)
+
+    gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                                    grad_outputs=torch.ones(disc_interpolates.size()).to(real.device),
+                                    create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * g_lambda
+    return gradient_penalty
+
 ##############################################################################
 # Classes
 ##############################################################################
@@ -349,7 +370,7 @@ class GANLoss(nn.Module):
             self.loss = nn.MSELoss()
         elif gan_mode == 'vanilla':
             self.loss = nn.BCEWithLogitsLoss()
-        elif gan_mode in ['wgangp', 'nonsaturating']:
+        elif gan_mode in ['wgan', 'nonsaturating']:
             self.loss = None
         else:
             raise NotImplementedError('gan mode %s not implemented' % gan_mode)
@@ -596,6 +617,7 @@ class G_Resnet(nn.Module):
 ##################################################################################
 # Encoder and Decoders
 ##################################################################################
+
 
 class E_adaIN(nn.Module):
     def __init__(self, input_nc, output_nc=1, nef=64, n_layers=4,
@@ -893,6 +915,7 @@ class LayerNorm(nn.Module):
             shape = [1, -1] + [1] * (x.dim() - 2)
             x = x * self.gamma.view(*shape) + self.beta.view(*shape)
         return x
+
 
 class ResnetGenerator(nn.Module):
     """Resnet-based generator that consists of Resnet blocks between a few downsampling/upsampling operations.
