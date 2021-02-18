@@ -46,5 +46,6 @@ def get_distance_lmark(lmark_truth, lmark_pred, device):
             diff += torch.abs(meanz_t - meanz_p)
             diff = diff / 3
 
+
             landmark_tot_distance.append(torch.tensor(diff).to(device))
     return torch.mean(torch.stack(landmark_tot_distance))

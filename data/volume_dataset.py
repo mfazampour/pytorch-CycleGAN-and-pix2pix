@@ -146,7 +146,7 @@ class VolumeDataset(BaseDataset):
         for root, dirs, files in os.walk(self.root):
             if ('nonrigid' in root) or ('cropped' not in root):
                 continue
-            if 'trus.mhd' not in files:
+            if 'trus_cut.mhd' not in files:
                 continue
             patients.append(root)
         return patients
@@ -169,7 +169,7 @@ class VolumeDataset(BaseDataset):
             'B': transformed_['trus'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]],
             'Patient': sample.split('/')[-4].replace(' ', ''),
             'A_paths': sample + "/mr.mhd",
-            'B_paths': sample + "/trus.mhd",
+            'B_paths': sample + "/trus_cut.mhd",
             'A_landmark': landmarks_a,
             'B_landmark': landmarks_b,
         }
@@ -192,16 +192,16 @@ class VolumeDataset(BaseDataset):
             if self.load_mask:
                 if os.path.isfile(sample + "/trus_tree.mhd"):
                     subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus_cut.mhd"),
                                               mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"),
                                               trus_tree=torchio.LabelMap(sample + "/trus_tree.mhd"))
                 else:
                     subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                              trus=torchio.ScalarImage(sample + "/trus.mhd"),
+                                              trus=torchio.ScalarImage(sample + "/trus_cut.mhd"),
                                               mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
             else:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                          trus=torchio.Image(sample + "/trus.mhd"))
+                                          trus=torchio.Image(sample + "/trus_cut.mhd"))
             self.subjects[sample] = subject
         subject = self.subjects[sample]
         return sample, subject

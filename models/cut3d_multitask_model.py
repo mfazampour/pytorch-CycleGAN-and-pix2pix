@@ -8,7 +8,6 @@ from .patchnce import PatchNCELoss
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from torchgeometry.losses import dice_loss
 
 from util import affine_transform
 from util import distance_landmarks
@@ -99,7 +98,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
             parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
-            parser.add_argument('--vxm_iteration_steps', type=int, default=1,
+            parser.add_argument('--vxm_iteration_steps', type=int, default=5,
                                 help='number of steps to train the registration network for each simulated US')
             parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
                                 help='type of the similarity used for training voxelmorph')
@@ -157,12 +156,12 @@ class CUT3DMultiTaskModel(CUT3dModel):
             self.criterionSeg = networks.DiceLoss()
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
-            self.distance_landmarks_b = 0
             self.transformer = vxm.layers.SpatialTransformer((1,1,80,80,80))
             #resize = vxm.layers.ResizeTransform(0.5, 1)
 
             self.first_phase_coeff = 1
             self.loss_landmarks = 0
+            self.loss_landmarks_deformed = 0
 
             self.first_phase_coeff = 1 if self.opt.epochs_before_reg > 0 else 0
 
@@ -242,7 +241,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         # <BaseModel.get_current_losses>
         self.loss_names = ['G', 'G_NCE', 'D_real', 'D_fake', 'RigidReg_fake', 'RigidReg_real']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
-        self.loss_names += ['dice', 'landmarks']
+        self.loss_names += [ 'landmarks']
         if self.opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
         # specify the images you want to save/display. The training/test scripts will call
@@ -290,20 +289,24 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
         self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
+
+
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
                                                                        self.real_B.shape[-3:],
                                                                        self.real_B.dtype,
                                                                        device=self.real_B.device)
+
         self.transformed_B = affine_transform.transform_image(self.real_B, affine, self.real_B.device)
         self.transformed_LM_B = affine_transform.transform_image(self.landmarks_B, affine, self.landmarks_B.device)
+
 
         if self.opt.show_volumes:
             affine_transform.show_volumes([self.real_B, self.transformed_B])
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
-
         if input['B_mask_available'][0]:  # TODO in this way it only works with batch size 1
             self.mask_B = input['B_mask'].to(self.device).type(self.real_A.dtype)
+            self.transformed_maskB = affine_transform.transform_image(self.mask_B, affine, self.mask_B.device)
         else:
             self.mask_B = None
 
@@ -323,7 +326,13 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.loss_RigidReg_fake = torch.tensor([0.0])
         self.loss_RigidReg_real = torch.tensor([0.0])
         self.loss_RigidReg = torch.tensor([0.0])
-        self.loss_dice = None
+        self.diff_dice= torch.tensor([0.0])
+        self.loss_landmarks_diff = torch.tensor([0.0])
+        self.loss_landmarks_deformed= torch.tensor([0.0])
+        self.loss_landmarks = torch.tensor([0.0])
+        self.loss_warped_dice = torch.tensor([0.0])
+
+
 
     def forward(self):
         super().forward()
@@ -350,6 +359,7 @@ class CUT3DMultiTaskModel(CUT3dModel):
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
         self.seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
+        self.LMK_A_deformed = self.transformer_label(self.landmarks_A, self.dvf.detach())
 
         self.compute_gt_dice()
         self.compute_landmark_loss()
@@ -488,20 +498,36 @@ class CUT3DMultiTaskModel(CUT3dModel):
                 one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
                 one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
                 one_hot_moving[:, i, self.mask_A[0, 0, ...] == i] = 1
+
+
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
-            self.loss_moving_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+            self.loss_moving_dice = compute_meandice(one_hot_deformed, one_hot_moving, include_background=False)
+            loss_beginning_dice = compute_meandice( one_hot_moving, one_hot_fixed,include_background=False)
+            self.diff_dice = loss_beginning_dice - self.loss_warped_dice
+
         else:
             self.loss_warped_dice = None
             self.loss_moving_dice = None
+            self.loss_beginning_dice = None
 
     def compute_landmark_loss(self):
-        self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
+
+        self.transformed_LM_B_back = affine_transform.transform_image(self.transformed_LM_B,
                                                                  affine_transform.tensor_vector_to_matrix(
                                                                      self.reg_B_params.detach()),
                                                                  device=self.transformed_LM_B.device)
 
-        self.loss_landmarks = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
-                                                                    self.transformed_LM_B.device)
+        loss_landmarks_beginning = distance_landmarks.get_distance_lmark( self.landmarks_A,self.transformed_LM_B,
+                                                                    self.landmarks_A.device)
+
+        self.loss_landmarks = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B_back,
+                                                                    self.transformed_LM_B_back.device)
+
+        self.loss_landmarks_deformed = distance_landmarks.get_distance_lmark(self.landmarks_B, self.LMK_A_deformed,
+                                                                    self.LMK_A_deformed.device)
+
+        self.loss_landmarks_diff = loss_landmarks_beginning - self.loss_landmarks_deformed
+
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
@@ -679,8 +705,36 @@ class CUT3DMultiTaskModel(CUT3dModel):
         overlay[overlay > 1] = 1
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
 
-        writer.add_scalar('landmarks/rigid', scalar_value=self.distance_landmarks_b, global_step=global_step)
-        writer.add_scalar('landmarks/def', scalar_value=self.distance_deformed_landmarks_b, global_step=global_step)
+
+        if self.loss_landmarks_diff is not None:
+
+            writer.add_scalar('landmarks/difference', scalar_value=self.loss_landmarks_diff, global_step=global_step)
+        else:
+            writer.add_scalar('landmarks/difference', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_landmarks is not None:
+            writer.add_scalar('landmarks/rigid', scalar_value=self.loss_landmarks, global_step=global_step)
+        else:
+            writer.add_scalar('landmarks/rigid', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+
+        if self.loss_landmarks_deformed is not None:
+            writer.add_scalar('landmarks/def', scalar_value=self.loss_landmarks_deformed, global_step=global_step)
+        else:
+            writer.add_scalar('landmarks/def', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+
+        if self.diff_dice is not None:
+            writer.add_scalar('DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
+        else:
+            writer.add_scalar('DICE/difference', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+
+        if self.loss_warped_dice is not None:
+            writer.add_scalar('DICE/deformed', scalar_value=self.loss_warped_dice, global_step=global_step)
+        else:
+            writer.add_scalar('DICE/deformed', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
 
         if use_image_name:
             tag = f'{self.patient}/Segmentation'
