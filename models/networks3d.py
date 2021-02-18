@@ -822,12 +822,15 @@ class G3d(nn.Module):
         tch_add = input_dim
         tch = input_dim
         self.tch_add = tch_add
-        self.decA1 = MisINSResBlock3d(tch, tch_add)
-        self.decA2 = MisINSResBlock3d(tch, tch_add)
-        self.decA3 = MisINSResBlock3d(tch, tch_add)
-        self.decA4 = MisINSResBlock3d(tch, tch_add)
+        self.decA = MisINSResBlock3d(tch, tch_add)
+        # self.decA1 = MisINSResBlock3d(tch, tch_add)
+        # self.decA2 = MisINSResBlock3d(tch, tch_add)
+        # self.decA3 = MisINSResBlock3d(tch, tch_add)
+        # self.decA4 = MisINSResBlock3d(tch, tch_add)
 
         self.decoder = []
+        n_res = 2
+        self.decoder += [ResBlocks3d(n_res, tch, norm, activation='lrelu', nz=0)]
         for i in range(0, n_layers-1):
             self.decoder += [ReLUINSConvTranspose3d(tch, tch // 2, kernel_size=3, stride=2, padding=1, output_padding=1)]
             tch = tch // 2
@@ -838,24 +841,25 @@ class G3d(nn.Module):
 
         self.mlpA = nn.Sequential(
             nn.Linear(style_dim, mlp_dim),
-            nn.ReLU(inplace=False),
-            nn.Linear(mlp_dim, mlp_dim),
-            nn.ReLU(inplace=False),
-            nn.Linear(mlp_dim, tch_add * 4))
+            nn.ReLU(inplace=True),
+            nn.Linear(mlp_dim, mlp_dim * 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(mlp_dim * 2, tch_add))  # * 4
 
     def forward(self, x, z):
 
         z = self.mlpA(z)
 
-        z1, z2, z3, z4 = torch.split(z, self.tch_add, dim=2)
-        z1, z2, z3, z4 = z1.contiguous(), z2.contiguous(), z3.contiguous(), z4.contiguous()
+        # z1, z2, z3, z4 = torch.split(z, self.tch_add, dim=2)
+        # z1, z2, z3, z4 = z1.contiguous(), z2.contiguous(), z3.contiguous(), z4.contiguous()
+        #
+        # out1 = self.decA1(x, z1)
+        # out2 = self.decA2(out1, z2)
+        # out3 = self.decA3(out2, z3)
+        # out4 = self.decA4(out3, z4)
+        out = self.decA(x, z)
 
-        out1 = self.decA1(x, z1)
-        out2 = self.decA2(out1, z2)
-        out3 = self.decA3(out2, z3)
-        out4 = self.decA4(out3, z4)
-
-        out = self.decoder(out4)
+        out = self.decoder(out)
 
         return out
 
@@ -1393,9 +1397,6 @@ class ContentEncoder3d(nn.Module):
             return feat, feats
         else:
             return self.model(x), None
-
-        for layer_id, layer in enumerate(self.model):
-            print(layer_id, layer)
 
 
 class DecoderAll3d(nn.Module):
