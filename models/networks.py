@@ -320,27 +320,6 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
                     initialize_weights=('stylegan2' not in netD))
 
 
-# Reference: https://github.com/jalola/improved-wgan-pytorch/blob/e664f47807105828c37258a74ee1508b6d9b667a/training_utils.py#L75
-def wasserstein_gradient_penalty(netD: torch.nn.Module, real: torch.Tensor, fake: torch.Tensor, g_lambda=1.0):
-    ndims = len(real.shape) - 2
-    alpha = torch.rand(real.size(0), *([1]*(ndims + 1)))
-    alpha = alpha.expand(real.size())
-    alpha = alpha.to(real.device)
-
-    interpolates = alpha * real.detach() + ((1 - alpha) * fake.detach())
-
-    interpolates = interpolates.to(real.device)
-    interpolates.requires_grad_(True)
-
-    disc_interpolates = netD(interpolates)
-
-    gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
-                                    grad_outputs=torch.ones(disc_interpolates.size()).to(real.device),
-                                    create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * g_lambda
-    return gradient_penalty
-
 ##############################################################################
 # Classes
 ##############################################################################
@@ -355,7 +334,7 @@ class GANLoss(nn.Module):
         """ Initialize the GANLoss class.
 
         Parameters:
-            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgangp.
+            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgan-gp.
             target_real_label (bool) - - label for a real image
             target_fake_label (bool) - - label of a fake image
 
@@ -370,7 +349,7 @@ class GANLoss(nn.Module):
             self.loss = nn.MSELoss()
         elif gan_mode == 'vanilla':
             self.loss = nn.BCEWithLogitsLoss()
-        elif gan_mode in ['wgan', 'nonsaturating']:
+        elif gan_mode in ['wgan', 'nonsaturating', 'wgan-gp']:
             self.loss = None
         else:
             raise NotImplementedError('gan mode %s not implemented' % gan_mode)
@@ -406,7 +385,7 @@ class GANLoss(nn.Module):
         if self.gan_mode in ['lsgan', 'vanilla']:
             target_tensor = self.get_target_tensor(prediction, target_is_real)
             loss = self.loss(prediction, target_tensor)
-        elif self.gan_mode == 'wgangp':
+        elif self.gan_mode == 'wgan-gp' or self.gan_mode == 'wgan':
             if target_is_real:
                 loss = -prediction.mean()
             else:
