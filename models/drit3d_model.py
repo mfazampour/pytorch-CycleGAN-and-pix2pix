@@ -139,22 +139,16 @@ class DRIT3dModel(BaseModel):
         beta1 = opt.beta1
         beta2 = opt.beta2
         # optimizers
-        enc_a_params = list(self.netEnc_attr_A.parameters()) + list(self.netEnc_attr_B.parameters())
+        enc_attr_params = list(self.netEnc_attr_A.parameters()) + list(self.netEnc_attr_B.parameters())
         gen_params = list(self.netGen_A.parameters()) + list(self.netGen_B.parameters())
-        self.disA_opt = torch.optim.Adam(self.netDis_A.parameters(), lr=lr, betas=(beta1, beta2),
-                                         weight_decay=weight_decay)
-        self.disB_opt = torch.optim.Adam(self.netDis_B.parameters(), lr=lr, betas=(beta1, beta2),
-                                         weight_decay=weight_decay)
-        self.disContent_opt = torch.optim.Adam(self.netDis_cont.parameters(), lr=lr_dcontent, betas=(beta1, beta2),
-                                               weight_decay=weight_decay)
-        self.enc_c_opt = torch.optim.Adam(self.netEnc_c.parameters(), lr=lr, betas=(beta1, beta2),
-                                          weight_decay=weight_decay)
-        self.enc_a_opt = torch.optim.Adam([p for p in enc_a_params if p.requires_grad], lr=lr, betas=(beta1, beta2),
-                                          weight_decay=weight_decay)
-        self.gen_opt = torch.optim.Adam([p for p in gen_params if p.requires_grad], lr=lr, betas=(beta1, beta2),
-                                        weight_decay=weight_decay)
-        self.optimizers = [self.disA_opt, self.disB_opt, self.disContent_opt,
-                           self.enc_c_opt, self.enc_a_opt, self.gen_opt]
+
+        self.disA_opt = torch.optim.Adam(self.netDis_A.parameters(), lr=lr * 4, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.disB_opt = torch.optim.Adam(self.netDis_B.parameters(), lr=lr * 4, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.disContent_opt = torch.optim.Adam(self.netDis_cont.parameters(), lr=lr_dcontent * 4, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.enc_c_opt = torch.optim.Adam(self.netEnc_c.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.enc_a_opt = torch.optim.Adam([p for p in enc_attr_params if p.requires_grad], lr=lr, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.gen_opt = torch.optim.Adam([p for p in gen_params if p.requires_grad], lr=lr, betas=(beta1, beta2), weight_decay=weight_decay)
+        self.optimizers = [self.disA_opt, self.disB_opt, self.disContent_opt, self.enc_c_opt, self.enc_a_opt, self.gen_opt]
 
     def data_dependent_initialize(self, data):
         pass
