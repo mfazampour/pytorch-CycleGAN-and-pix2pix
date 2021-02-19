@@ -204,7 +204,18 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = RegGenerator3D(input_nc, 8, norm_layer=norm_layer, use_dropout=False)
     elif netG == 'resnet_cat':
         n_blocks = 5
-        net = G_Resnet3d(input_nc, output_nc, 0, num_downs=2, n_res=n_blocks - 4, ngf=ngf, norm='inst', nl_layer='relu')
+        if opt is not None and hasattr(opt, 'output_nc_attr'):
+            nz = opt.output_nc_attr
+        else:
+            nz = 0
+        if opt is not None and hasattr(opt, 'n_layers_cont'):
+            n_layers = opt.n_layers_cont
+        else:
+            n_layers = 2
+        if opt is not None and 'drit' in opt.model:
+            net = G_Resnet3d_Drit(input_nc, output_nc, nz, num_downs=n_layers, n_res=n_blocks - 4, ngf=ngf, norm='inst', nl_layer='relu')
+        else:
+            net = G_Resnet3d(input_nc, output_nc, nz, num_downs=n_layers, n_res=n_blocks - 4, ngf=ngf, norm='inst', nl_layer='relu')
     elif netG == 'drit':
         net = G3d(input_nc, output_nc, opt.mlp_nc, opt.output_nc_attr, n_layers=opt.n_layers_cont, norm=opt.norm_gen)
     else:
@@ -713,6 +724,23 @@ class G_Resnet3d(nn.Module):
                 return images_recon, feats
             else:
                 return images_recon
+
+
+class G_Resnet3d_Drit(nn.Module):
+    def __init__(self, input_nc, output_nc, nz, num_downs, n_res, ngf=64,
+                 norm=None, nl_layer=None):
+        super(G_Resnet3d_Drit, self).__init__()
+        n_downsample = num_downs
+        pad_type = 'reflect'
+        self.dec = DecoderAll3d(n_downsample, n_res, input_nc, output_nc, norm=norm,
+                                activ=nl_layer, pad_type=pad_type, nz=nz)
+
+    def decode(self, content, style=None):
+        return self.dec(content, style)
+
+    def forward(self, content, style):
+        images_recon = self.decode(content, style)
+        return images_recon
 
 
 class ResnetGenerator3d(nn.Module):
@@ -1551,8 +1579,8 @@ class ResBlocks3d(nn.Module):
 # Basic Blocks
 ###########################################
 def cat_feature3d(x, y):
-    y_expand = y.view(y.size(0), y.size(1), 1, 1, 1).expand(
-        y.size(0), y.size(1), x.size(2), x.size(3), x.size(4))
+    y_expand = y.view(y.size(0), y.size(-1), 1, 1, 1).expand(
+        y.size(0), y.size(-1), x.size(2), x.size(3), x.size(4))
     x_cat = torch.cat([x, y_expand], 1)
     return x_cat
 
