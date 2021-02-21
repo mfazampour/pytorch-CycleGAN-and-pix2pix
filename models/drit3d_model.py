@@ -45,31 +45,33 @@ class DRIT3dModel(BaseModel):
         # generator
         parser.add_argument('--mlp_nc', type=int, default=16, help='number of filters of mlp layer in generator')
         parser.add_argument('--norm_gen', type=str, default='in', help='norm layer of generator')
-        # discriminator domain
-        parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
-        parser.add_argument('--n_scale', type=int, default=3, help='number of scales of the discriminator')
-        parser.add_argument('--norm_d', type=str, default='in', help='norm layer of discriminator')
-        # discriminator content
-        parser.add_argument('--ndcf', type=int, default=16, help='number of filters of disc content')
-        parser.add_argument('--n_layers_d_cont', type=int, default=1, help='number of layers of disc content')
-        parser.add_argument('--norm_d_cont', type=str, default='in', help='norm layer of disc content')
-        parser.add_argument('--netD_cont', type=str, default='n_layers', help='type of the disc content')
-        # losses
-        parser.add_argument('--recon_loss', type=str, default='l1', choices=['l1', 'lcc'], help='type of the cycle consistency loss')
-        parser.add_argument('--use_ms', action='store_true', help='use mode seeking loss')
-        parser.add_argument('--cont_d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type content disc loss')
-        parser.add_argument('--d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type domain disc loss')
-        # lambdas
-        parser.add_argument('--lambda_cont_adv', type=float, default=1.0, help='coeff of content adv loss')
-        parser.add_argument('--lambda_domain_adv', type=float, default=1.0, help='coeff of domain adv loss')
-        parser.add_argument('--lambda_domain_adv_random', type=float, default=1.0, help='coeff of domain adv loss')
-        parser.add_argument('--lambda_attr_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
-        parser.add_argument('--lambda_cont_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
-        parser.add_argument('--lambda_cc', type=float, default=1.0, help='coeff of cylce consistency loss')
-        parser.add_argument('--lambda_recon', type=float, default=10.0, help='coeff of reconstruction loss')
-        parser.add_argument('--lambda_latent', type=float, default=10.0, help='coeff of latent reconstruction loss')
-        parser.add_argument('--lambda_gp', type=float, default=10.0, help='coeff of gradient penalization')
-        parser.add_argument('--lambda_cont_gp', type=float, default=10.0, help='coeff of gradient penalization of cont. disc.')
+
+        if is_train:
+            # discriminator domain
+            parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
+            parser.add_argument('--n_scale', type=int, default=3, help='number of scales of the discriminator')
+            parser.add_argument('--norm_d', type=str, default='in', help='norm layer of discriminator')
+            # discriminator content
+            parser.add_argument('--ndcf', type=int, default=16, help='number of filters of disc content')
+            parser.add_argument('--n_layers_d_cont', type=int, default=2, help='number of layers of disc content')
+            parser.add_argument('--norm_d_cont', type=str, default='in', help='norm layer of disc content')
+            parser.add_argument('--netD_cont', type=str, default='n_layers', help='type of the disc content')
+            # losses
+            parser.add_argument('--recon_loss', type=str, default='l1', choices=['l1', 'lcc'], help='type of the cycle consistency loss')
+            parser.add_argument('--use_ms', action='store_true', help='use mode seeking loss')
+            parser.add_argument('--cont_d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type content disc loss')
+            parser.add_argument('--d_loss', type=str, default='minmax', choices=['minmax', 'lsgan', 'wgan-gp'], help='type domain disc loss')
+            # lambdas
+            parser.add_argument('--lambda_cont_adv', type=float, default=1.0, help='coeff of content adv loss')
+            parser.add_argument('--lambda_domain_adv', type=float, default=1.0, help='coeff of domain adv loss')
+            parser.add_argument('--lambda_domain_adv_random', type=float, default=1.0, help='coeff of domain adv loss')
+            parser.add_argument('--lambda_attr_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
+            parser.add_argument('--lambda_cont_reg', type=float, default=0.01, help='coeff of attribute regularization loss')
+            parser.add_argument('--lambda_cc', type=float, default=1.0, help='coeff of cylce consistency loss')
+            parser.add_argument('--lambda_recon', type=float, default=10.0, help='coeff of reconstruction loss')
+            parser.add_argument('--lambda_latent', type=float, default=10.0, help='coeff of latent reconstruction loss')
+            parser.add_argument('--lambda_gp', type=float, default=10.0, help='coeff of gradient penalization')
+            parser.add_argument('--lambda_cont_gp', type=float, default=10.0, help='coeff of gradient penalization of cont. disc.')
 
 
         parser.set_defaults(pool_size=0, dataset_mode='volume')  # no image pooling
