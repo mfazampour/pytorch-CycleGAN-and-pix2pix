@@ -132,7 +132,7 @@ class DRIT3dModel(BaseModel):
 
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)
             self.criterionGAN_cont = networks.GANLoss(opt.gan_mode_cont).to(self.device)
-            self.criterionGAN_cont_G = networks.GANLoss(opt.gan_mode_cont, target_fake_label=0.5, target_real_label=0.5).to(self.device)
+            # self.criterionGAN_cont_G = networks.GANLoss(opt.gan_mode_cont, target_fake_label=0.5, target_real_label=0.5).to(self.device)
 
     def create_optimizers(self, opt):
         lr = opt.lr
@@ -235,8 +235,12 @@ class DRIT3dModel(BaseModel):
     def compute_D_cont_loss(self):
         self.disContent_opt.zero_grad()
 
-        real_loss = self.criterionGAN_cont(self.netDis_cont(self.zc_a.detach()), target_is_real=True)
-        fake_loss = self.criterionGAN_cont(self.netDis_cont(self.zc_b.detach()), target_is_real=False)
+        a_is_real = True
+        if np.random.rand() > 0.9:  # switch real/fake randomly when training
+            a_is_real = False
+
+        real_loss = self.criterionGAN_cont(self.netDis_cont(self.zc_a.detach()), target_is_real=a_is_real)
+        fake_loss = self.criterionGAN_cont(self.netDis_cont(self.zc_b.detach()), target_is_real=not a_is_real)
         loss_netD = (real_loss + fake_loss) * 0.5
         if self.opt.gan_mode_cont == 'wgan-gp':
             loss_gp, _ = networks.cal_gradient_penalty(self.netDis_cont, self.zc_a.detach(), self.zc_b.detach(),
@@ -314,8 +318,9 @@ class DRIT3dModel(BaseModel):
         For definition see equation (6)
         """
         # 1. Content adversarial loss
-        loss_G_GAN_A_content = self.backward_G_GAN_content(self.zc_a) * self.opt.lambda_cont_adv
-        loss_G_GAN_B_content = self.backward_G_GAN_content(self.zc_b) * self.opt.lambda_cont_adv
+
+        loss_G_GAN_A_content = self.criterionGAN_cont(self.zc_a, target_is_real=False) * self.opt.lambda_cont_adv
+        loss_G_GAN_B_content = self.criterionGAN_cont(self.zc_b, target_is_real=True) * self.opt.lambda_cont_adv
 
         # 2. Domain adversarial loss
         loss_G_GAN_A = self.backward_G_GAN(self.fake_a_encoded, self.netDis_A, self.real_a_encoded != -1) * self.opt.lambda_domain_adv
@@ -368,12 +373,8 @@ class DRIT3dModel(BaseModel):
         self.loss_cc_zc_b = loss_cc_zc_b.item()
         self.loss_G = loss_G.item()
 
-    def backward_G_GAN_content(self, data):
-        loss = self.criterionGAN_cont_G(data, target_is_real=True)  # flag is useless since we are comparing against 0.5
-        return loss
-
     def backward_G_GAN(self, fake: torch.Tensor, netD: torch.nn.Module, mask: torch.Tensor):
-        loss = self.criterionGAN(netD(fake), target_is_real=True)
+        loss = self.criterionGAN(netD(fake) * mask.detach(), target_is_real=True)
         return loss
 
     def backward_G_alone(self):
@@ -428,7 +429,7 @@ class DRIT3dModel(BaseModel):
         for i, (key) in enumerate(volumes):
             vxm.torch.utils.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
         if use_image_name:
-            tag = f'{self.patient}/images'
+            tag = f'{self.patient[0]}/images'
         else:
             tag = 'images'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
