@@ -52,7 +52,7 @@ class VolumeDataset(BaseDataset):
         """
         parser.add_argument('--visualize_volume', type=bool, default=False, help='Set visualize to False. it\'s only '
                                                                                  'used for debugging.')
-        parser.add_argument('--load_mask', type=bool, default=False, help='load prostate mask for seg. loss')
+        parser.add_argument('--load_mask', type=bool, default=True, help='load prostate mask for seg. loss')
         parser.add_argument('--inshape', type=int, nargs='+', default=[80] * 3,
                             help='after cropping shape of input. '
                                  'default is equal to image size. specify if the input can\'t path through UNet')
@@ -144,7 +144,7 @@ class VolumeDataset(BaseDataset):
     def read_list_of_patients(self):
         patients = []
         for root, dirs, files in os.walk(self.root):
-            if ('nonrigid' in root) or ('cropped' not in root):
+            if ('nonrigid' in root) or ('cropped' not in root) or ('5992C6' in root) or ('D5656C' in root):
                 continue
             if 'trus_cut.mhd' not in files:
                 continue

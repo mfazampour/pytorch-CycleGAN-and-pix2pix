@@ -77,7 +77,7 @@ def getLandmarks(filename, landmarks_filename):
             print(f' pixel value {image_3D.GetPixel(x, y, z,)}')
 
 
-        for index in range(1,3):
+        for index in range(1,6):
           #  image_3D.SetPixel(x, y, z, i+1)
             try:
                 image_3D.SetPixel(x+index, y, z, (i + 1))
@@ -92,6 +92,7 @@ def getLandmarks(filename, landmarks_filename):
                 except:
                    # print("outside of bounds")
                    A = 1
+
             try:
                 image_3D.SetPixel(x, y+index, z, (i + 1))
                 image_3D.SetPixel(x+index, y+index, z, (i + 1))
@@ -117,12 +118,7 @@ def getLandmarks(filename, landmarks_filename):
                     image_3D.SetPixel(x - index, y - index, z - index, (i + 1))
                 except:
                     A = 1
-                   # print("outside of bounds")
 
-
-     #   landmark_list.append(image_3D)
-  #  print(f" get size image_3D{image_3D.GetSize()}")
-  #  print(f" get size torch image 3D { torch.FloatTensor(sitk.GetArrayFromImage(image_3D)).transpose(0, 2).shape}")
     return torch.FloatTensor(sitk.GetArrayFromImage(image_3D)).transpose(0, 2)
 #
 

@@ -3,8 +3,11 @@ import torch
 
 
 def get_index(lmark_truth, lmark_pred, number):
+
     index_t = torch.where(lmark_truth == number)
     index_p = torch.where(lmark_pred == number)
+
+  #  print(f" number: {number} \n index_t: {index_t}  \n index_p: {index_p}")
     #
     if len(index_p[0]) < 1:
         if torch.mean(index_t[0].float()) > 41:
@@ -46,6 +49,6 @@ def get_distance_lmark(lmark_truth, lmark_pred, device):
             diff += torch.abs(meanz_t - meanz_p)
             diff = diff / 3
 
-
             landmark_tot_distance.append(torch.tensor(diff).to(device))
+
     return torch.mean(torch.stack(landmark_tot_distance))

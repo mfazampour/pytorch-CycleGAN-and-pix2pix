@@ -706,7 +706,7 @@ class ResnetGenerator3d(nn.Module):
                           norm_layer(ngf * mult * 2),
                           nn.ReLU(True)]
             else:
-                model += [nn.Conv3d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
+                model += [nn.Conv3d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
                           norm_layer(ngf * mult * 2),
                           nn.ReLU(True),
                           Downsample(ngf * mult * 2)]
@@ -722,8 +722,8 @@ class ResnetGenerator3d(nn.Module):
             mult = 2 ** (n_downsampling - i)
             if no_antialias_up:
                 model += [nn.ConvTranspose3d(ngf * mult, int(ngf * mult / 2),
-                                             kernel_size=3, stride=2,
-                                             padding=1, output_padding=[1, 1],
+                                             kernel_size=3, stride=1,
+                                             padding=1, output_padding=[1,1,0],
                                              bias=use_bias),
                           norm_layer(int(ngf * mult / 2)),
                           nn.ReLU(True)]
@@ -732,12 +732,12 @@ class ResnetGenerator3d(nn.Module):
                 model += [Upsample3d(ngf * mult),
                           nn.Conv3d(ngf * mult, int(ngf * mult / 2),
                                     kernel_size=3, stride=1,
-                                    padding=1,  # output_padding=1,
+                                    padding=[1,1,0],  # output_padding=1,
                                     bias=use_bias),
                           norm_layer(int(ngf * mult / 2)),
                           nn.ReLU(True)]
         model += [nn.ReplicationPad3d(3)]
-        model += [nn.Conv3d(ngf, output_nc, kernel_size=7, padding=0)]
+        model += [nn.Conv3d(ngf, output_nc, kernel_size=7, stride=1, padding=[0,0,0])]
         model += [nn.Tanh()]
 
         self.model = nn.Sequential(*model)
@@ -1671,8 +1671,9 @@ class Upsample3d(nn.Module):
         self.pad = get_pad_layer(pad_type)([1, 1, 1, 1, 1, 1])
 
     def forward(self, inp):
+
         ret_val = F.conv_transpose3d(self.pad(inp), weight=self.filt, stride=self.stride, padding=1 + self.pad_size,
-                                     groups=inp.shape[1])[:, :, 1:, 1:]
+                                     groups=inp.shape[1], output_padding=[1,0,0])[:, :, 1:, 1:]
         if (self.filt_odd):
             return ret_val
         else:

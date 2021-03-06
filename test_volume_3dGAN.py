@@ -165,4 +165,4 @@ if __name__ == '__main__':
                 file_name = f'volumes/{patient_name}_original_registered.mhd'
                 save_image(reg_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
                 file_name = f'volumes/{patient_name}_transformed.mhd'
-                save_image(model.transformed_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)
+                save_image(model.deformed_B.cpu().squeeze(dim=0).numpy(), file_name, transform_img)

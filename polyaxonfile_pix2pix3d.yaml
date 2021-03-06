@@ -21,7 +21,6 @@ environment:
 framework: pytorch
 kind: experiment
 params: 
-  CUT_mode: CUT
   batch_size: 1
   dataroot: /Prostate_Reg_KM/Anonymized_cleaned/
   dataset_mode: volume
@@ -29,24 +28,16 @@ params:
   display_id: -1
   epoch: latest
   epoch_count: 0
-  epochs_before_reg: 0
   input_nc: 1
-  load_init_models: /data/Prostate_Reg_KM/multitask/cut3d/50577/experiment_name
   load_mask: true
-  lr: 0.000001
-  lr_Def: 0.00001
-  lr_Reg: 0.00001
-  lr_Seg: 0.00001
-  lr_decay_iters: 1
-  lr_policy: linear
-  model: cut3d_multitask
+  lr: 0.0002
+  lr_policy: step
+  model: pix2pix3d
   n_epochs: 50
   n_epochs_decay: 25
   name: cut3d
-  netG: resnet_cat
-  netReg: NormalNet
-  netSeg: unet_small
-  ngf: 64
+  netG: unet_small
+  netD: basic
   output_nc: 1
   print_freq: 20
 
@@ -57,33 +48,20 @@ run:
 	--output_nc={{ output_nc }} \\ 
 	--input_nc={{ input_nc }} \\ 
 	--lr {{ lr }} \\ 
-	--lr_Def {{ lr_Def }} \\ 
-	--lr_Seg {{ lr_Seg }} \\ 
-	--lr_Reg {{ lr_Reg }} \\ 
 	--lr_policy={{ lr_policy }} \\ 
 	--display_freq={{ display_freq }} \\ 
 	--print_freq {{ print_freq }} 
-	--lr_decay_iters {{ lr_decay_iters }} \\ 
 	--epoch_count={{ epoch_count }} \\ 
 	--n_epochs={{ n_epochs }} \\ 
-	--n_epochs_decay {{ n_epochs_decay }} \\ 
 	--netG={{ netG }} \\ 
-	--CUT_mode={{ CUT_mode }} \\ 
+	--netD={{netD}} \\
 	--model={{ model }} \\ 
-	--load_mask={{ load_mask }} \\ 
-	--epochs_before_reg={{ epochs_before_reg }} \\ 
-	--epoch={{ epoch }} \\ 
-	--display_id={{ display_id }} \\ 
-	--load_init_models={{load_init_models}} \\ 
-	--ngf={{ ngf }} \\ 
-	--continue_train \\ 
-	--netReg={{ netReg }} \\ 
-	--netSeg={{ netSeg }} \\ 
-	--use_rigid_branch\\
-	--reg_idt_B"
+	--display_id={{ display_id }} \\ "
 
 
 tags: 
-  - Mutltitask
-  - HPTuning
+  - pix2pix3d
 version: 1
+
+
+

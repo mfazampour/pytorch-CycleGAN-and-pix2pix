@@ -259,6 +259,7 @@ class pix2pixHDModel(BaseModel):
         self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
         self.loss_names = ['G','G_GAN_Feat','G_GAN', 'D_real', 'D_fake']
     def name(self):
+
         return 'Pix2PixHDModel'
 
     def clean_tensors(self):
@@ -276,6 +277,7 @@ class pix2pixHDModel(BaseModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
+        self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
         self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
@@ -289,7 +291,11 @@ class pix2pixHDModel(BaseModel):
             affine_transform.show_volumes([self.real_B, self.transformed_B])
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
-        ###
+        if input['B_mask_available'][0]:  # TODO in this way it only works with batch size 1
+            self.mask_B = input['B_mask'].to(self.device).type(self.real_A.dtype)
+            self.deformed_mask_B = affine_transform.transform_image(self.mask_B, affine, self.mask_B.device)
+        else:
+            self.mask_B = None
 
 
         self.loss_G_GAN = torch.tensor([0.0])
@@ -310,7 +316,7 @@ class pix2pixHDModel(BaseModel):
         else:
             return edge.float()
 
-    def forward(self, ):
+    def forward(self):
 
         # pix2pixHD
         # Encode Inputs
@@ -357,7 +363,8 @@ class pix2pixHDModel(BaseModel):
 
         self.loss_G = self.loss_pix2pix
 
-        self.loss_G.backward()
+        if torch.is_grad_enabled():
+            self.loss_G.backward()
 
     def backward_D(self):
         self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
@@ -391,44 +398,66 @@ class pix2pixHDModel(BaseModel):
 
         return reg_A, reg_B
 
-    def compute_visuals(self):
-        """Calculate additional output images for visdom and HTML visualization"""
-        super().compute_visuals()
-
 
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
 
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
-        self.log_tensorboard_base(writer=writer, losses=losses, global_step=global_step)
-
-    # print(f"{torch.cuda.memory_allocated()} log tensorboard")
-
-    def log_tensorboard_base(self, writer: SummaryWriter, losses: OrderedDict, global_step: int):
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
 
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
-                                         image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
-                                         image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
-                                         image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
+        if save_gif:
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
+                                             image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
+                                             image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
+                                             image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
 
 
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
+        axs, fig = vxm.torch.utils.init_figure(3, 3)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-        writer.add_figure(tag='GAN', figure=fig, global_step=global_step)
+        if use_image_name:
+            tag = f'{self.patient}/GAN'
+        else:
+            tag = 'GAN'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-        for key in losses:
-            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
-    #  print(f"{torch.cuda.memory_allocated()} log tensorboard base")
+        if losses is not None:
+            for key in losses:
+                writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+
+
+    def compute_D_loss(self):
+        """Calculate GAN loss for the discriminator"""
+        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+        return self.loss_D
+
+
+    def compute_visuals(self):
+        """Calculate additional output images for visdom and HTML visualization"""
+        n_c = self.real_A.shape[2]
+        # average over channel to get the real and fake image
+        self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
+        self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
+        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[3]
+        self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
+        self.fake_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
+
+        n_c = self.real_A.shape[4]
+        self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
+        self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
+        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]

@@ -28,42 +28,231 @@ See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-a
 """
 import os
 from options.test_options import TestOptions
+from util.visualizer import save_images
+import torch
+import numpy as np
+import csv
 from data import create_dataset
 from models import create_model
-from util.visualizer import save_images
-from util import html
+from util.visualizer import Visualizer
+from torch.utils.tensorboard import SummaryWriter
 
 
 if __name__ == '__main__':
-    opt = TestOptions().parse()  # get test options
-    # hard-code some parameters for test
-    opt.num_threads = 0   # test code only supports num_threads = 1
-    opt.batch_size = 1    # test code only supports batch_size = 1
-    opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
-    opt.no_flip = True    # no flip; comment this line if results on flipped images are needed.
-    opt.display_id = -1   # no visdom display; the test code saves the results to a HTML file.
-    dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
-    model = create_model(opt)      # create a model given opt.model and other options
+  #  opt = TestOptions().parse()  # get test options
+    parser = TestOptions()
+    opt = parser.parse()  # get training options
+
+    try:
+        from polyaxon_helper import (
+            get_outputs_path,
+            get_data_paths,
+        )
+
+        base_path = get_data_paths()
+        print("You are running on the cluster :)")
+        opt.dataroot = base_path['data1'] + opt.dataroot
+        opt.checkpoints_dir = get_outputs_path()
+        opt.display_id = -1  # no visdom available on the cluster
+        parser.print_options(opt)
+    except Exception as e:
+        print(e)
+        print("You are Running on the local Machine")
+
+    dataset_test = create_dataset(opt, mode='test')
+    dataset_val = create_dataset(opt, mode='validation')  # validation dataset
+
+    dataset_size = len(dataset_test)  # get the number of images in the dataset.
+
+    model = create_model(opt)  # create a model given opt.model and other options
     model.setup(opt)               # regular setup: load and print networks; create schedulers
+
+    print('The number of test images = %d' % dataset_size)
+
+    visualizer = Visualizer(opt)  # create a visualizer that display/save images and plots
+    opt.visualizer = visualizer
+
+    opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
+
+    times = []
+    opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
+    os.makedirs(opt.tensorboard_path, exist_ok=True)
+    writer = SummaryWriter(opt.tensorboard_path)
     # create a website
-    web_dir = os.path.join(opt.results_dir, opt.name, '{}_{}'.format(opt.phase, opt.epoch))  # define the website directory
-    if opt.load_iter > 0:  # load_iter is 0 by default
-        web_dir = '{:s}_iter{:d}'.format(web_dir, opt.load_iter)
-    print('creating web directory', web_dir)
-    webpage = html.HTML(web_dir, 'Experiment = %s, Phase = %s, Epoch = %s' % (opt.name, opt.phase, opt.epoch))
+
     # test with eval mode. This only affects layers like batchnorm and dropout.
     # For [pix2pix]: we use batchnorm and dropout in the original pix2pix. You can experiment it with and without eval() mode.
     # For [CycleGAN]: It should not affect CycleGAN as CycleGAN uses instancenorm without dropout.
     if opt.eval:
         model.eval()
-    for i, data in enumerate(dataset):
-        if i >= opt.num_test:  # only apply our model to opt.num_test images.
-            break
-        model.set_input(data)  # unpack data from data loader
-        model.test()           # run inference
-        visuals = model.get_current_visuals()  # get image results
-        img_path = model.get_image_paths()     # get image paths
-        if i % 5 == 0:  # save images to an HTML file
-            print('processing (%04d)-th image... %s' % (i, img_path))
-        save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
-    webpage.save()  # save the HTML
+    print('evaluating model on labeled data')
+    losses_total = []
+    keys = []
+    loss_aggregate = {}
+    land_rig = []
+    land_def = []
+    land_beg = []
+    dice_dif = []
+    dice_move = []
+    dice_warp = []
+
+    for j, (test_data) in enumerate(dataset_test):
+        model.eval()  # change networks to eval mode
+        with torch.no_grad():
+            model.set_input(test_data)  # unpack data from data loader
+            model.forward()  # run inference
+            model.calculate_loss_values()  # get the loss values
+            model.compute_visuals()
+            losses = model.get_current_losses()
+            losses_total.append(losses)
+            model.get_current_visuals()
+            landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
+            land_beg.append(landmarks_beg.item())
+            land_rig.append(landmarks_rig.item())
+            land_def.append(landmarks_def.item())
+            loss_warped_dice, loss_moving_dice, loss_diff_dice  =model.get_current_dice()
+            dice_dif.append(loss_diff_dice)
+            dice_move.append(loss_moving_dice)
+            dice_warp.append(loss_warped_dice)
+
+            if hasattr(model, 'log_tensorboard'):
+                model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+        keys = losses.keys()
+
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_def' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_def = csv.writer(csvfile)
+        writer_def.writerow(map(lambda x: [x], land_def))
+
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_rigid' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_rig = csv.writer(csvfile)
+        writer_rig.writerow(map(lambda x: [x], land_rig))
+
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_beg' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_beg = csv.writer(csvfile)
+        writer_beg.writerow(map(lambda x: [x], land_beg))
+
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_dif' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_beg = csv.writer(csvfile)
+        writer_beg.writerow(map(lambda x: [x], dice_dif))
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_move' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_beg = csv.writer(csvfile)
+        writer_beg.writerow(map(lambda x: [x], dice_move))
+    with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_warp' + '.csv', 'w',
+              newline='') as csvfile:
+        writer_beg = csv.writer(csvfile)
+        writer_beg.writerow(map(lambda x: [x], dice_warp))
+
+    for key in keys:
+        loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
+    for key in loss_aggregate:
+        writer.add_scalar(f'test-losses/{key}', scalar_value=loss_aggregate[key], global_step=1)
+
+        for j, (test_data) in enumerate(dataset_test):
+            model.eval()  # change networks to eval mode
+            with torch.no_grad():
+                model.set_input(test_data)  # unpack data from data loader
+                model.forward()  # run inference
+                model.calculate_loss_values()  # get the loss values
+                model.compute_visuals()
+                losses = model.get_current_losses()
+                losses_total.append(losses)
+                model.get_current_visuals()
+                landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
+                land_beg.append(landmarks_beg.item())
+                land_rig.append(landmarks_rig.item())
+                land_def.append(landmarks_def.item())
+                loss_warped_dice, loss_moving_dice, loss_diff_dice = model.get_current_dice()
+                dice_dif.append(loss_diff_dice)
+                dice_move.append(loss_moving_dice)
+                dice_warp.append(loss_warped_dice)
+
+                if hasattr(model, 'log_tensorboard'):
+                    model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+            keys = losses.keys()
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_def' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_def = csv.writer(csvfile)
+            writer_def.writerow(map(lambda x: [x], land_def))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_rigid' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_rig = csv.writer(csvfile)
+            writer_rig.writerow(map(lambda x: [x], land_rig))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_beg' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], land_beg))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_dif' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_dif))
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_move' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_move))
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_dice_warp' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_warp))
+
+
+
+
+        for j, (test_data) in enumerate(dataset_val):
+            model.eval()  # change networks to eval mode
+            with torch.no_grad():
+                model.set_input(test_data)  # unpack data from data loader
+                model.forward()  # run inference
+                model.calculate_loss_values()  # get the loss values
+                model.compute_visuals()
+                losses = model.get_current_losses()
+                losses_total.append(losses)
+                model.get_current_visuals()
+                landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
+                land_beg.append(landmarks_beg.item())
+                land_rig.append(landmarks_rig.item())
+                land_def.append(landmarks_def.item())
+                loss_warped_dice, loss_moving_dice, loss_diff_dice = model.get_current_dice()
+                dice_dif.append(loss_diff_dice)
+                dice_move.append(loss_moving_dice)
+                dice_warp.append(loss_warped_dice)
+
+                if hasattr(model, 'log_tensorboard'):
+                    model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+            keys = losses.keys()
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_landmarks_def' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_def = csv.writer(csvfile)
+            writer_def.writerow(map(lambda x: [x], land_def))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_landmarks_rigid' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_rig = csv.writer(csvfile)
+            writer_rig.writerow(map(lambda x: [x], land_rig))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_landmarks_beg' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], land_beg))
+
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_dice_dif' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_dif))
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_dice_move' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_move))
+        with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_dice_warp' + '.csv', 'w',
+                  newline='') as csvfile:
+            writer_beg = csv.writer(csvfile)
+            writer_beg.writerow(map(lambda x: [x], dice_warp))

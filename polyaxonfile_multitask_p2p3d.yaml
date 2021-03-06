@@ -1,68 +1,56 @@
----
-version: 1
-
-kind: experiment
-
-framework: pytorch
-
-tags: [Mutltitask, HPTuning]
-
-
-
-build:
-  image: pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime
-  build_steps:
-    - apt update
-    - apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git
-    - pip install -r requirements.txt
-
-environment:
-  resources:
-    cpu:
-      requests: 3
-      limits: 4
-    memory:
-      requests: 20000
-      limits: 32000
-    gpu:
-      requests: 1
-      limits: 1
-  node_selector:
+--- 
+build: 
+  build_steps: 
+    - "apt update"
+    - "apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git"
+    - "pip install -r requirements.txt"
+  image: "pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime"
+environment: 
+  node_selector: 
     nvidiaDriver: "450"
-
-params:
+  resources: 
+    cpu: 
+      limits: 4
+      requests: 3
+    gpu: 
+      limits: 1
+      requests: 1
+    memory: 
+      limits: 32000
+      requests: 20000
+framework: pytorch
+kind: experiment
+params: 
   dataroot: '/Prostate_Reg_KM/Anonymized_cleaned/'
   dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
   lr: 0.000001
-  lr_Def: 0.00001
-  lr_Seg: 0.00001
-  lr_Reg: 0.0002
+  lr_Def: 0.0001
+  lr_Seg: 0.0001
+  lr_Reg: 0.0001
   netReg: 'NormalNet'
   netSeg: 'unet_small'
   lr_policy: "linear"
-  display_freq: 250
+  display_freq: 50
   print_freq: 20
   lr_decay_iters: 1
   batch_size: 1
-  epoch_count: 6
-  n_epochs: 50
-  netG: "global"
-  model: "pix2pixHD_multitask"
-  name: "HD_multi"
+  epoch_count: 0
+  netG: unet_small
+  netD: basic
+  model: pix2pix3d_multitask
+  n_epochs: 10
+  name: p2p3d_multi
   val_fold: "validation/"
   train_fold: "train/"
   load_mask: True
   display_id: -1
-  load_init_models: "/data/Prostate_Reg_KM/multitask/pix2pixHD/from5/experiment_name/"
+  load_init_models: "/data/Prostate_Reg_KM/multitask/pix2pix/"
   epochs_before_regline: 0
-  epoch: 5
+  epoch: latest
   n_blocks_global: 9
   n_blocks_local: 3
-  ngf: 32
-  
-
 
 
 run:
@@ -79,16 +67,14 @@ run:
                                     --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
                                     --netG={{ netG }} \ 
-                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --netD={{ netD }} \ 
                                     --model={{ model }} \ 
                                     --val_fold={{ val_fold }} \ 
                                     --train_fold={{ train_fold }} \ 
                                     --load_mask={{ load_mask }} \ 
                                     --n_blocks_global={{ n_blocks_global }} \
-                                    --name={{ name }} \
                                     --load_init_models={{ load_init_models }} \
                                     --n_blocks_local={{ n_blocks_local }} \
-                                    --ngf={{ ngf }} \
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
                                     --netReg={{ netReg }} \
@@ -97,3 +83,10 @@ run:
                                     --no_instance
                                     --no_vgg_loss
                                     --use_rigid_branch
+
+tags: 
+  - pix2pix3d
+version: 1
+
+
+

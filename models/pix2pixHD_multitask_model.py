@@ -5,25 +5,27 @@ from typing import Tuple
 import util.util as util
 from util.image_pool import ImagePool
 from util import affine_transform
+
 from util import distance_landmarks
 from models.base_model import BaseModel
 from torch.autograd import Variable
 from monai.visualize import img2tensorboard
+from monai.metrics import compute_meandice
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import sys
-from models import networks
 from models import networks3d
+from models import networks
 from torchgeometry import losses
-#from .cut3d_model import CUT3dModel
+from .pix2pixHD_model import pix2pixHDModel
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 #sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
 from voxelmorph import voxelmorph as vxm
 
 
-class pix2pixHDMultitaskModel(BaseModel):
+class pix2pixHDMultitaskModel(pix2pixHDModel):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
@@ -44,7 +46,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         parser.add_argument('--netReg', type=str, default='NormalNet', help='Type of network used for registration')
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
 
-        parser.add_argument('--epochs_before_reg', type=int, default=15,
+        parser.add_argument('--epochs_before_reg', type=int, default=0,
                             help='number of epochs to train the network before reg loss is used')
         parser.add_argument('--cudnn-nondet', action='store_true',
                             help='disable cudnn determinism - might slow down training')
@@ -89,10 +91,15 @@ class pix2pixHDMultitaskModel(BaseModel):
             parser.add_argument('--no-lsgan', type=bool, default=False)
             parser.add_argument('--lambda_Reg', type=float, default=0.5, help='weight for the registration loss')
             parser.add_argument('--lr_Reg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
-            parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
+            parser.add_argument('--lambda_Seg', type=float, default=1, help='weight for the segmentation loss')
             parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
+
+            parser.add_argument('--vxm_iteration_steps', type=int, default=5,
+                                help='number of steps to train the registration network for each simulated US')
+            parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
+                                help='type of the similarity used for training voxelmorph')
 
             # loss hyperparameters
             parser.add_argument('--image-loss', default='mse',
@@ -128,6 +135,7 @@ class pix2pixHDMultitaskModel(BaseModel):
 
         self.set_visdom_names()
 
+
         # HD
         self.input_nc = opt.label_nc if opt.label_nc != 0 else opt.input_nc
         # Generator network
@@ -141,9 +149,9 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.use_features = opt.instance_feat or opt.label_feat
         self.gen_features = self.use_features and not self.opt.load_features
 
-        self.set_networks(opt)
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
 
+        self.set_networks(opt)
 
 
 
@@ -163,7 +171,6 @@ class pix2pixHDMultitaskModel(BaseModel):
           #  self.criterionSeg = losses.dice()
             self.optimizer_Seg = torch.optim.Adam(self.netSeg.parameters(), lr=opt.lr_Seg, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_Seg)
-            self.distance_landmarks_b = 0
 
             # pix2pixHD optimizers
             # optimizer G
@@ -194,7 +201,7 @@ class pix2pixHDMultitaskModel(BaseModel):
                 self.netG_input_nc += opt.feat_num
 
 
-        self.first_phase_coeff = 1
+        self.first_phase_coeff = 0
 
     def encode_input(self, label_map, inst_map=None, real_image=None, feat_map=None, infer=False):
         if self.opt.label_nc == 0:
@@ -262,6 +269,8 @@ class pix2pixHDMultitaskModel(BaseModel):
             self.model_names = ['G', 'E','D', 'RigidReg', 'DefReg', 'Seg']
         else:  # during test time, only load G
             self.model_names = ['G', 'E','RigidReg', 'DefReg', 'Seg']
+        self.loss_functions = ['compute_D_loss', 'backward_G', 'backward_RigidReg', 'backward_DefReg_Seg']
+
 
         # We are using DenseNet for rigid registration -- actually DenseNet didn't provide any performance improvement
         # TODO change this to obelisk net
@@ -288,7 +297,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         )
         self.netDefReg = networks3d.init_net(self.netDefReg, gpu_ids=self.gpu_ids)
 
-        self.netSeg = networks3d.define_G(opt.input_nc, opt.num_classes, opt.ngf,
+        self.netSeg = networks3d.define_G(opt.input_nc, opt.num_classes, 64,
                                           opt.netSeg, opt.norm, use_dropout=not opt.no_dropout,
                                           gpu_ids=self.gpu_ids, is_seg_net=True)
         self.transformer_label = networks3d.init_net(vxm.layers.SpatialTransformer(size=opt.inshape, mode='nearest'),
@@ -310,13 +319,19 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.netE = networks3d.define_G(input_nc=opt.output_nc, output_nc=opt.feat_num, ngf=opt.nef, netG='encoder',
                                         n_downsample_global=opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)
 
+    def get_current_landmark_distances(self):
+        return self.loss_landmarks_beginning , self.loss_landmarks_rigid, self.loss_landmarks_def
+
+    def get_current_dice(self):
+        return self.loss_warped_dice,self.loss_moving_dice, self.loss_diff_dice
     def set_visdom_names(self):
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
         # Names so we can breakout loss
         self.loss_names = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
         self.loss_names += [ 'G','RigidReg_fake', 'RigidReg_real']
-        print("LOSS NAMES")
+      #  self.loss_names += [ 'landmarks_def','landmarks_rigid','landmarks_def_diff','landmarks_rigid_diff']
+        self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
         self.loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
 
         # specify the images you want to save/display. The training/test scripts will call
@@ -361,20 +376,35 @@ class pix2pixHDMultitaskModel(BaseModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
+
+        self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
         self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
+
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
                                                                        self.real_B.shape[-3:],
                                                                        self.real_B.dtype,
                                                                        device=self.real_B.device)
-        self.transformed_B = affine_transform.transform_image(self.real_B, affine, self.real_B.device)
-        self.transformed_LM_B = affine_transform.transform_image(self.landmarks_B, affine, self.landmarks_B.device)
+
+        self.deformed_B = affine_transform.transform_image(self.real_B, affine, self.real_B.device)
+        self.deformed_LM_B = affine_transform.transform_image(self.landmarks_B, affine, self.landmarks_B.device)
 
         if self.opt.show_volumes:
-            affine_transform.show_volumes([self.real_B, self.transformed_B])
+            affine_transform.show_volumes([self.real_B, self.deformed_B])
 
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
-        ###
+        if input['B_mask_available'][0]:  # TODO in this way it only works with batch size 1
+            self.mask_B = input['B_mask'].to(self.device).type(self.real_A.dtype)
+            self.deformed_mask_B = affine_transform.transform_image(self.mask_B, affine, self.mask_B.device)
+        else:
+            self.mask_B = None
+
+        self.init_loss_tensors()
+
+
+
+    def init_loss_tensors(self):
+
         self.loss_DefReg_real = torch.tensor([0.0])
         self.loss_DefReg = torch.tensor([0.0])
         self.loss_DefReg_fake = torch.tensor([0.0])
@@ -389,12 +419,21 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.loss_RigidReg_real = torch.tensor([0.0])
         self.loss_RigidReg = torch.tensor([0.0])
 
+        self.loss_D = torch.tensor([0.0])
+
         self.loss_G_GAN =  torch.tensor([0.0])
         self.loss_G_GAN_Feat =  torch.tensor([0.0])
         self.loss_D_real =  torch.tensor([0.0])
         self.loss_D_fake =  torch.tensor([0.0])
 
         self.netG_input_nc = torch.tensor([0.0])
+
+        #self.loss_landmarks_diff = None
+        #self.loss_landmarks_deformed = None
+        #self.loss_landmarks = None
+        #self.loss_warped_dice = None
+        #self.loss_beginning_dice = None
+
 
 
 
@@ -412,28 +451,15 @@ class pix2pixHDMultitaskModel(BaseModel):
 
 
     def forward(self,):
+        super().forward()
 
-        #pix2pixHD
-        # Encode Inputs
-        self.input_label, inst_map, real_image, feat_map = self.encode_input(label_map=self.mask_A, inst_map=None, real_image=self.real_B, feat_map=None)
-
-
-        self.input_concat = torch.cat((self.mask_A, self.real_A), dim=1)
-       # else:
-        #self.input_concat = torch.tensor(self.input_label)
-
-        #print(f"Concat size: {self.input_concat.shape}")
-        self.fake_B = self.netG.forward(self.input_concat)
-
-
-
-       # super().forward()
-        self.reg_A_params = self.netRigidReg(torch.cat([self.fake_B, self.transformed_B], dim=1))
-        self.reg_B_params = self.netRigidReg(torch.cat([self.real_B, self.transformed_B], dim=1))
+        self.reg_A_params = self.netRigidReg(torch.cat([self.fake_B, self.deformed_B], dim=1))
+        self.reg_B_params = self.netRigidReg(torch.cat([self.real_B, self.deformed_B], dim=1))
 
         fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         fixed = fixed * 0.5 + 0.5
         def_reg_output = self.netDefReg(self.fake_B * 0.5 + 0.5, fixed, registration=not self.isTrain)
+
         if self.opt.bidir:
             (self.deformed_fake_B, self.deformed_B, self.dvf) = def_reg_output
         else:
@@ -443,8 +469,51 @@ class pix2pixHDMultitaskModel(BaseModel):
             self.dvf = self.resizer(self.dvf)
         self.deformed_A = self.transformer_intensity(self.real_A, self.dvf.detach())
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
+
         self.seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
         self.seg_fake_B = self.netSeg(self.fake_B)
+        self.Landmark_A_dvf = self.transformer_label(self.landmarks_A, self.dvf.detach())
+
+
+    def backward_DefReg_Seg(self):
+        fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
+        fixed = fixed * 0.5 + 0.5
+        def_reg_output = self.netDefReg(self.fake_B.detach() * 0.5 + 0.5, fixed)  # fake_B is the moving image here
+        if self.opt.bidir:
+            (deformed_fake_B, deformed_B, dvf) = def_reg_output
+        else:
+            (deformed_fake_B, dvf) = def_reg_output
+
+        self.loss_DefReg_real = self.criterionDefReg(deformed_fake_B, self.real_B)  # TODO add weights same as vxm!
+        self.loss_DefReg = self.loss_DefReg_real
+        if self.opt.bidir:
+            self.loss_DefReg_fake = self.criterionDefReg(deformed_B, self.fake_B.detach())
+            self.loss_DefReg += self.loss_DefReg_fake
+        else:
+            self.loss_DefReg_fake = torch.tensor([0.0])
+        self.loss_DefRgl = self.criterionDefRgl(dvf, None)
+        self.loss_DefReg += self.loss_DefRgl
+        ## ADDED: warped loss
+
+        #if self.loss_warped_dice:
+        #    self.loss_DefReg += self.loss_warped_dice.data[0][0]
+        self.loss_DefReg *= (1 - self.first_phase_coeff)
+        seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
+        dvf_resized = self.resizer(dvf)
+        mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
+        self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
+      #  self.loss_Seg_real = self.compute_dice(seg_B, mask_A_deformed)
+
+        seg_fake_B = self.netSeg(self.fake_B.detach())
+        self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
+       # self.loss_Seg_fake = self.compute_dice(seg_fake_B, self.mask_A)
+
+        self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
+        if torch.is_grad_enabled():
+            (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
+
+
+
 
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
@@ -491,12 +560,15 @@ class pix2pixHDMultitaskModel(BaseModel):
             loss_DefReg_fake = 0
 
         # fifth, segmentation
-        loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
+      #  loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
+        loss_G_Seg = self.compute_dice(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
+
 
         # combine loss and calculate gradients
         self.loss_G = self.loss_pix2pix * self.first_phase_coeff + \
                       loss_DefReg_fake * (1 - self.first_phase_coeff) + \
                       loss_G_Seg * (1 - self.first_phase_coeff)
+
 
         if self.opt.use_rigid_branch:
             self.loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
@@ -504,12 +576,14 @@ class pix2pixHDMultitaskModel(BaseModel):
         ############### Backward Pass ####################
         # update generator weight
 
-        self.loss_G.backward()
+        self.compute_gt_dice()
+        self.compute_landmark_loss()
+        if torch.is_grad_enabled():
+            self.loss_G.backward()
 
 
 
     def backward_D(self):
-        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
         self.loss_D.backward()
     #    print(f"{torch.cuda.memory_allocated()} backward D")
 
@@ -521,74 +595,55 @@ class pix2pixHDMultitaskModel(BaseModel):
         Returns
         -------
         """
-        reg_A_params = self.netRigidReg(torch.cat([self.fake_B.detach(), self.transformed_B], dim=1))
+        reg_A_params = self.netRigidReg(torch.cat([self.fake_B.detach(), self.deformed_B], dim=1))
         self.loss_RigidReg_fake = self.criterionRigidReg(reg_A_params,
                                                          self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
         self.loss_RigidReg_real = self.criterionRigidReg(self.reg_B_params,
                                                          self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
 
         self.loss_RigidReg = self.loss_RigidReg_real + self.loss_RigidReg_fake * (1 - self.first_phase_coeff)
-        self.loss_RigidReg.backward()
-        print(f"{torch.cuda.memory_allocated()} backward rigidreg")
+        if torch.is_grad_enabled():
+            self.loss_RigidReg.backward()
 
 
 
-    def bacward_DefReg_Seg(self):
-        fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
-        fixed = fixed * 0.5 + 0.5
-        def_reg_output = self.netDefReg(self.fake_B.detach() * 0.5 + 0.5, fixed)  # fake_B is the moving image here
-        if self.opt.bidir:
-            (deformed_fake_B, deformed_B, dvf) = def_reg_output
-        else:
-            (deformed_fake_B, dvf) = def_reg_output
+    def compute_D_loss(self):
+        """Calculate GAN loss for the discriminator"""
+        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, use_pool=True)
+        self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
 
-        self.loss_DefReg_real = self.criterionDefReg(deformed_fake_B, self.real_B)  # TODO add weights same as vxm!
-        self.loss_DefReg = self.loss_DefReg_real
-        if self.opt.bidir:
-            self.loss_DefReg_fake = self.criterionDefReg(deformed_B, self.fake_B.detach())
-            self.loss_DefReg += self.loss_DefReg_fake
-        else:
-            self.loss_DefReg_fake = torch.tensor([0.0])
-        self.loss_DefRgl = self.criterionDefRgl(dvf, None)
-        self.loss_DefReg += self.loss_DefRgl
-        self.loss_DefReg *= (1 - self.first_phase_coeff)
-
-        seg_B = self.netSeg(self.idt_B.detach() if self.opt.reg_idt_B else self.real_B)
-        dvf_resized = self.resizer(dvf)
-        mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
-        self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
-
-        seg_fake_B = self.netSeg(self.fake_B.detach())
-        self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
-
-        self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
-        # self.loss_DefReg.backward()
-        (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
-      #  print(f"{torch.cuda.memory_allocated()} backward defreg_seg")
-
+        # Real Detection and Loss
+        pred_real = self.discriminate(self.input_cat, self.real_B)
+        self.loss_D_real = self.criterionGAN(pred_real, True)
+        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
 
     def optimize_parameters(self):
         self.forward()  # compute fake images: G(A), rigid registration params, DVF and segmentation mask
-        # update D
-    #    self.set_requires_grad(self.netD, True)  # enable backprop for D
-    #    self.optimizer_D.zero_grad()  # set D's gradients to zero
-    #    self.loss_D = super().compute_D_loss()
-    #    self.loss_D.backward()
-    #    self.optimizer_D.step()  # update D's weights
-
-        # update G
-        #self.set_requires_grad(self.netD, False)  # D requires no gradients when optimizing G
-        self.set_requires_grad(self.netRigidReg, False)
+        self.set_requires_grad(self.netRigidReg, True)
         self.set_requires_grad(self.netDefReg, False)
         self.set_requires_grad(self.netSeg, False)
+        self.set_requires_grad(self.netD, False)
+        self.set_requires_grad(self.netG, False)
+
+
+        # update G
         self.optimizer_G.zero_grad()  # set G's gradients to zero
         self.backward_G()  # calculate gradients for G
         self.optimizer_G.step()  # update G's weights
 
         # Update D
-        self.optimizer_D.zero_grad()
-        self.backward_D()
-        self.optimizer_D.step()
+    #    self.set_requires_grad(self.netD, True)  # enable backprop for D
+        self.optimizer_D.zero_grad()  # set D's gradients to zero
+        self.compute_D_loss()
+        if torch.is_grad_enabled():
+            self.loss_D.backward()
+        self.optimizer_D.step()  # update D's weights
+        self.set_requires_grad(self.netD, False)  # enable backprop for D
+
+        # update G
+        self.optimizer_G.zero_grad()  # set G's gradients to zero
+        self.backward_G()  # calculate gradients for G
+     #   self.optimizer_G.step()  # update G's weights
 
         # update rigid registration network
         if self.opt.use_rigid_branch:
@@ -596,18 +651,70 @@ class pix2pixHDMultitaskModel(BaseModel):
             self.optimizer_RigidReg.zero_grad()
             self.backward_RigidReg()
             self.optimizer_RigidReg.step()
+        self.set_requires_grad(self.netRigidReg, False)
 
         # update deformable registration and segmentation network
         if (1 - self.first_phase_coeff) == 0:
             return
-        self.set_requires_grad(self.netDefReg, True)
-        self.set_requires_grad(self.netSeg, True)
-        self.optimizer_DefReg.zero_grad()
-        self.optimizer_Seg.zero_grad()
-        self.bacward_DefReg_Seg()
-        self.optimizer_DefReg.step()
-        self.optimizer_Seg.step()
 
+        for _ in range(self.opt.vxm_iteration_steps):
+            self.set_requires_grad(self.netDefReg, True)
+            self.set_requires_grad(self.netSeg, True)
+            self.optimizer_DefReg.zero_grad()
+            self.optimizer_Seg.zero_grad()
+            self.backward_DefReg_Seg()  # only back propagate through fake_B once
+            self.optimizer_DefReg.step() 
+            self.optimizer_Seg.step()
+
+
+    def compute_gt_dice(self):
+        """
+        calculate the dice score between the deformed mask and the ground truth if we have it
+        Returns
+        -------
+
+        """
+        if self.mask_B is not None:
+            shape = list(self.mask_A_deformed.shape)
+            n = self.opt.num_classes  # number of classes
+            shape[1] = n
+            one_hot_fixed = torch.zeros(shape, device=self.device)
+            one_hot_deformed = torch.zeros(shape, device=self.device)
+            one_hot_moving = torch.zeros(shape, device=self.device)
+            for i in range(n):
+                one_hot_fixed[:, i, self.mask_B[0, 0, ...] == i] = 1
+                one_hot_deformed[:, i, self.mask_A_deformed[0, 0, ...] == i] = 1
+                one_hot_moving[:, i, self.mask_A[0, 0, ...] == i] = 1
+
+            self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
+            self.loss_moving_dice = compute_meandice(one_hot_deformed, one_hot_moving, include_background=False)
+            loss_beginning_dice = compute_meandice(one_hot_moving, one_hot_fixed, include_background=False)
+            self.loss_diff_dice = loss_beginning_dice - self.loss_warped_dice
+
+        else:
+            self.loss_warped_dice = None
+            self.loss_moving_dice = None
+            self.loss_diff_dice = None
+
+
+
+
+    def compute_dice(self,y_pred, y):
+        """
+        calculate the dice score between the y_pred and y
+        -------
+
+        """
+        shape = list(y_pred.shape)
+        n = self.opt.num_classes  # number of classes
+        shape[1] = n
+        one_hot_y_pred = torch.zeros(shape, device=self.device)
+        one_hot_y = torch.zeros(shape, device=self.device)
+        for i in range(n):
+            one_hot_y_pred[:, i, y_pred[0, 0, ...] == i] = 1
+            one_hot_y[:, i, y[0, 0, ...] == i] = 1
+
+        return compute_meandice(one_hot_y_pred, one_hot_y, include_background=False)
 
     def get_transformed_images(self) -> Tuple[torch.Tensor, torch.Tensor]:
         reg_A = affine_transform.transform_image(self.real_B,
@@ -621,22 +728,42 @@ class pix2pixHDMultitaskModel(BaseModel):
 
         return reg_A, reg_B
 
+    def compute_landmark_loss(self):
+
+        # Calc landmark difference from original landmarks and deformed
+
+        self.loss_landmarks_beginning = distance_landmarks.get_distance_lmark(self.landmarks_A, self.deformed_LM_B,
+                                                                              self.deformed_LM_B.device)
+
+        # Add affine transform from G to the original landmarks A to match deformed B landmarks
+        self.landmarks_rigid_A = affine_transform.transform_image(self.landmarks_A,
+                                                                  affine_transform.tensor_vector_to_matrix(
+                                                                      self.reg_A_params.detach()),
+
+                                                                  device=self.landmarks_A.device)
+
+        #  Calc landmark difference from deformed landmarks and the affine(Deformed)
+        self.loss_landmarks_rigid = distance_landmarks.get_distance_lmark(self.deformed_LM_B, self.landmarks_rigid_A,
+                                                                          self.deformed_LM_B.device)
+
+        self.loss_landmarks_def = distance_landmarks.get_distance_lmark(self.Landmark_A_dvf, self.deformed_LM_B,
+                                                                        self.deformed_LM_B.device)
+
+        self.loss_landmarks_rigid_diff = self.loss_landmarks_beginning - self.loss_landmarks_rigid
+        self.loss_landmarks_def_diff = self.loss_landmarks_beginning - self.loss_landmarks_def
+
+
+
+
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
         super().compute_visuals()
 
         reg_A, reg_B = self.get_transformed_images()
-        self.transformed_LM_B = affine_transform.transform_image(self.transformed_LM_B,
-                                                                 affine_transform.tensor_vector_to_matrix(
-                                                                     self.reg_B_params.detach()),
-                                                                 device=self.transformed_LM_B.device)
 
-        self.distance_landmarks_b = distance_landmarks.get_distance_lmark(self.landmarks_B, self.transformed_LM_B,
-                                                                          self.transformed_LM_B.device)
-
-        self.diff_A = reg_A - self.transformed_B
-        self.diff_B = reg_B - self.transformed_B
-        self.diff_orig = self.real_B - self.transformed_B
+        self.diff_A = reg_A - self.deformed_B
+        self.diff_B = reg_B - self.deformed_B
+        self.diff_orig = self.real_B - self.deformed_B
         self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
         self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
 
@@ -647,7 +774,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.reg_B_center_sag = reg_B[:, :, int(n_c / 2), ...]
         self.diff_B_center_sag = self.diff_B[:, :, int(n_c / 2), ...]
         self.diff_orig_center_sag = self.diff_orig[:, :, int(n_c / 2), ...]
-        self.deformed_center_sag = self.transformed_B[:, :, int(n_c / 2), ...]
+        self.deformed_center_sag = self.deformed_B[:, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[3]
         self.reg_A_center_cor = reg_A[:, :, :, int(n_c / 2), ...]
@@ -655,7 +782,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.reg_B_center_cor = reg_B[:, :, :, int(n_c / 2), ...]
         self.diff_B_center_cor = self.diff_B[:, :, :, int(n_c / 2), ...]
         self.diff_orig_center_cor = self.diff_orig[:, :, :, int(n_c / 2), ...]
-        self.deformed_center_cor = self.transformed_B[:, :, :, int(n_c / 2), ...]
+        self.deformed_center_cor = self.deformed_B[:, :, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[4]
         self.reg_A_center_axi = reg_A[..., int(n_c / 2)]
@@ -663,7 +790,7 @@ class pix2pixHDMultitaskModel(BaseModel):
         self.reg_B_center_axi = reg_B[..., int(n_c / 2)]
         self.diff_B_center_axi = self.diff_B[..., int(n_c / 2)]
         self.diff_orig_center_axi = self.diff_orig[..., int(n_c / 2)]
-        self.deformed_center_axi = self.transformed_B[..., int(n_c / 2)]
+        self.deformed_center_axi = self.deformed_B[..., int(n_c / 2)]
 
         n_c = self.real_A.shape[2]
         # average over channel to get the real and fake image
@@ -698,85 +825,149 @@ class pix2pixHDMultitaskModel(BaseModel):
         if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
-        self.log_tensorboard_base(writer=writer, losses=losses, global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
-        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
-        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff Orig')
-        vxm.torch.utils.fill_subplots(self.transformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
-        writer.add_figure(tag='Rigid', figure=fig, global_step=global_step)
+    def log_tensorboard(self,status, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
+        super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
+                                save_gif=save_gif, use_image_name=use_image_name)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 5)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask A')
-        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg Fake')
-        vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[2, :], img_name='Seg B')
-        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
-        overlay *= 0.8
-        overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Def mask overlay', cmap=None)
-        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
-        overlay *= 0.8
-        overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Seg overlay', cmap=None)
-        writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
+        self.add_rigid_figures(global_step=global_step, writer=writer, use_image_name=use_image_name)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 6)
+        self.add_segmentation_figures(global_step=global_step, writer=writer, use_image_name=use_image_name)
+
+        self.add_deformable_figures(global_step=global_step, writer=writer, use_image_name=use_image_name)
+
+        self.add_landmark_losses(status=status,global_step=global_step, writer=writer)
+
+
+
+
+    def add_deformable_figures(self,global_step, writer, use_image_name=False):
+        n = 8 if self.mask_B is None else 10
+        axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, ...], img_name='Def. X', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, ...], img_name='Def. Y', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, ...], img_name='Def. Z', cmap='RdBu',
+        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
         vxm.torch.utils.fill_subplots(self.deformed_A.detach().cpu(), axs=axs[3, :], img_name='Deformed')
+        vxm.torch.utils.fill_subplots((self.deformed_A.detach() - self.real_A).abs().cpu(),
+                                      axs=axs[4, :], img_name='Deformed - moving')
+        overlay = self.real_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay *= 0.8
+        overlay[:, 0:1, ...] += (0.5 * self.real_B.detach() + 0.5) * 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Moving overlay', cmap=None)
         overlay = self.deformed_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay *= 0.8
         overlay[:, 0:1, ...] += (0.5 * self.real_B.detach() + 0.5) * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Deformed overlay', cmap=None)
         overlay = self.mask_A.repeat(1, 3, 1, 1, 1)
         overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
         overlay[:, 2, ...] = 0
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Def. mask overlay', cmap=None)
-        writer.add_figure(tag='Deformable', figure=fig, global_step=global_step)
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
+        if self.mask_B is not None:
+            overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = self.mask_A.detach()
+            overlay[:, 2, ...] = 0
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask moving on US', cmap=None)
 
-        writer.add_scalar('landmarks/', scalar_value=self.distance_landmarks_b, global_step=global_step)
-       # print(f"{torch.cuda.memory_allocated()} log tensorboard")
+            overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
+            overlay[:, 2, ...] = 0
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[9, :], img_name='mask warped on US', cmap=None)
+#
+        if use_image_name:
+            tag =  f'{self.patient}/Deformable'
+        else:
+            tag =  'Deformable'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-
-
-    def log_tensorboard_base(self, writer: SummaryWriter, losses: OrderedDict, global_step: int):
-        image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
-        image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
-        image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
-
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
-                                         image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
-                                         image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-        img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
-                                         image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
-                                         global_step=global_step)
-     #   img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/IDT B", max_out=85,
-     #                                    image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
-     #                                    global_step=global_step)
-
+    def add_rigid_figures(self, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 4)
         vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-      #  vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
-        writer.add_figure(tag='GAN', figure=fig, global_step=global_step)
+        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
+        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
+        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff orig')
+        vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
 
-        for key in losses:
-            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
-      #  print(f"{torch.cuda.memory_allocated()} log tensorboard base")
+        if use_image_name:
+            tag = f'{self.patient}/Rigid'
+        else:
+            tag = 'Rigid'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+
+    def add_segmentation_figures(self, global_step, writer, use_image_name=False):
+        axs, fig = vxm.torch.utils.init_figure(3, 7)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
+        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg fake US')
+
+        overlay = self.fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.seg_fake_B.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Fake mask overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[3, :], img_name='Deformed mask')
+
+        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. mask overlay', cmap=None)
+        vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[5, :], img_name='Seg. US')
+
+        overlay = self.real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
+        overlay *= 0.8
+        overlay[overlay > 1] = 1
+        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
+        if use_image_name:
+            tag =  f'{self.patient}/Segmentation'
+        else:
+            tag =  'Segmentation'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+
+    def add_landmark_losses(self, status,global_step, writer):
+
+        if self.loss_landmarks_rigid_diff is not None:
+            writer.add_scalar(status+'landmarks/difference_rigid', scalar_value=self.loss_landmarks_rigid_diff,
+                              global_step=global_step)
+        #      else:
+        #         writer.add_scalar('landmarks/difference_rigid', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_landmarks_rigid is not None:
+            writer.add_scalar(status+'landmarks/rigid', scalar_value=self.loss_landmarks_rigid, global_step=global_step)
+        #     else:
+        #        writer.add_scalar('landmarks/rigid', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_landmarks_def is not None:
+            writer.add_scalar(status+'landmarks/def', scalar_value=self.loss_landmarks_def, global_step=global_step)
+        # else:
+        #    writer.add_scalar('landmarks/def', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_landmarks_def_diff is not None:
+            writer.add_scalar(status+'landmarks/difference_def', scalar_value=self.loss_landmarks_def_diff,
+                              global_step=global_step)
+        # else:
+        #    writer.add_scalar('landmarks/difference_def', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_diff_dice is not None:
+            writer.add_scalar(status+'DICE/difference', scalar_value=self.loss_diff_dice, global_step=global_step)
+        #   else:
+        #      writer.add_scalar('DICE/difference', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+        if self.loss_warped_dice is not None:
+            writer.add_scalar(status+'DICE/deformed', scalar_value=self.loss_warped_dice, global_step=global_step)
+
+        if self.loss_moving_dice is not None:
+            writer.add_scalar(status+'DICE/moving', scalar_value=self.loss_moving_dice, global_step=global_step)
+    # else:
+    # else:
+    #    writer.add_scalar('DICE/deformed', scalar_value=torch.tensor([0.0]), global_step=global_step)
+
+                                                   #
+

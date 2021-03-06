@@ -10,7 +10,7 @@ class TrainOptions(BaseOptions):
     def initialize(self, parser):
         parser = BaseOptions.initialize(self, parser)
         # visdom and HTML visualization parameters
-        parser.add_argument('--display_freq', type=int, default=400, help='frequency of showing training results on screen')
+        parser.add_argument('--display_freq', type=int, default=100, help='frequency of showing training results on screen')
         parser.add_argument('--display_ncols', type=int, default=4, help='if positive, display all images in a single visdom web panel with certain number of images per row.')
         parser.add_argument('--display_id', type=int, default=-1, help='window id of the web display. Default is random window id')
         parser.add_argument('--display_server', type=str, default="http://localhost", help='visdom server of the web display')
@@ -19,11 +19,11 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--update_html_freq', type=int, default=1000, help='frequency of saving training results to html')
         parser.add_argument('--print_freq', type=int, default=100, help='frequency of showing training results on console')
         parser.add_argument('--no_html', action='store_true', help='do not save intermediate training results to [opt.checkpoints_dir]/[opt.name]/web/')
-        parser.add_argument('--evalutate_freq', type=int, default=1000, help='frequency to run the test code')
+        parser.add_argument('--evalutate_freq', type=int, default=250, help='frequency to run the val code')
         # network saving and loading parameters
-        parser.add_argument('--save_latest_freq', type=int, default=5000, help='frequency of saving the latest results')
+        parser.add_argument('--save_latest_freq', type=int, default=500, help='frequency of saving the latest results')
         parser.add_argument('--save_epoch_freq', type=int, default=5, help='frequency of saving checkpoints at the end of epochs')
-        parser.add_argument('--evaluation_freq', type=int, default=5000, help='evaluation freq')
+        parser.add_argument('--evaluation_freq', type=int, default=500, help='evaluation freq')
         parser.add_argument('--save_by_iter', action='store_true', help='whether saves model by iteration')
         parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
         parser.add_argument('--epoch_count', type=int, default=1, help='the starting epoch count, we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>, ...')
@@ -48,7 +48,7 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--niter_decay', type=int, default=100,
                                  help='# of iter to linearly decay learning rate to zero')
         # for discriminators
-        parser.add_argument('--num_D', type=int, default=2, help='number of discriminators to use')
+        parser.add_argument('--num_D', type=int, default=3, help='number of discriminators to use')
         parser.add_argument('--n_layers_D', type=int, default=3, help='only used if which_model_netD==n_layers')
         parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in first conv layer')
         parser.add_argument('--lambda_feat', type=float, default=10.0, help='weight for feature matching loss')

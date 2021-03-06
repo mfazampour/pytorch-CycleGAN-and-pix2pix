@@ -36,7 +36,7 @@ def transform_image(img: torch.Tensor, transform, device):
     transformed image
     """
     grid = F.affine_grid(transform[:, :3, :], img.shape, align_corners=False).to(device)
-    x_trans = F.grid_sample(img, grid, padding_mode='border', align_corners=False)
+    x_trans = F.grid_sample(img, grid, mode='nearest', padding_mode='border', align_corners=False)
     # x_trans = torch.tensor(x_trans.view(1,9,256,256))
     return x_trans
 

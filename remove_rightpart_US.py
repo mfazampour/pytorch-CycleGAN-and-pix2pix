@@ -24,9 +24,9 @@ for subdir, dirs, files in os.walk(root):
 
 
             img = sitk.GetArrayFromImage(image)
-            #fig = plt.figure()
-            #ax1 = fig.add_subplot(2, 2, 1)
-            #ax1.imshow(img[:, :, 40])
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1, 2, 1)
+            ax1.imshow(img[:, :, 40], cmap="gray")
             for depth in range(img.shape[2]):
                 for row in range(img.shape[0]):
                     for pixel in reversed(range(img.shape[1])):
@@ -35,14 +35,14 @@ for subdir, dirs, files in os.walk(root):
                             break
 
             dir = subdir + "/trus_cut.mhd"
-          #  ax2 = fig.add_subplot(2, 2, 2)
-          #  ax2.imshow(img[:,:,40])
-          #  plt.show()
+            ax2 = fig.add_subplot(1, 2, 2)
+            ax2.imshow(img[:,:,40], cmap="gray")
+            plt.show()
             new_itk_image = sitk.GetImageFromArray(img)
             new_itk_image.SetOrigin(image.GetOrigin())
             new_itk_image.SetSpacing(image.GetSpacing())
             new_itk_image.SetDirection(image.GetDirection())
-            sitk.WriteImage(new_itk_image, dir)
-            mhd_new = open(dir, "a")
-            mhd_new.write(orientation)
-            mhd_new.close()
+#            sitk.WriteImage(new_itk_image, dir)
+          #  mhd_new = open(dir, "a")
+          #  mhd_new.write(orientation)
+          #  mhd_new.close()

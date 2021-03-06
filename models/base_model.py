@@ -164,8 +164,7 @@ class BaseModel(ABC):
         """Return visualization images. train.py will display these images with visdom, and save the images to a HTML"""
         visual_ret = OrderedDict()
         for name in self.visual_names:
-            if isinstance(name, str):
-                visual_ret[name] = getattr(self, name)
+            if isinstance(name, str):                visual_ret[name] = getattr(self, name)
         return visual_ret
 
     def get_current_losses(self):
@@ -241,10 +240,9 @@ class BaseModel(ABC):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 if self.opt.isTrain and self.opt.pretrained_name is not None:
                         join_ = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
-                        load_dir = join_
+                        load_dir = join
                 else:
                     load_dir = self.opt.load_init_models
-
                 load_path = os.path.join(load_dir, load_filename)
                 net = getattr(self, 'net' + name)
                 if isinstance(net, torch.nn.DataParallel):

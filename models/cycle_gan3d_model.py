@@ -8,9 +8,12 @@ import itertools
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks3d
-
+from voxelmorph import voxelmorph as vxm
+from torch.utils.tensorboard import SummaryWriter
+from monai.visualize import img2tensorboard
 from . import networks
-
+from collections import OrderedDict
+from util import affine_transform
 
 
 class CycleGAN3dModel(BaseModel):
@@ -66,7 +69,7 @@ class CycleGAN3dModel(BaseModel):
         """
         BaseModel.__init__(self, opt)
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
-        self.loss_names = ['D_A', 'G_A', 'cycle_A', 'idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B']
+        self.loss_names = ['G','D_A', 'G_A', 'cycle_A', 'idt_A', 'D_B', 'G_B', 'cycle_B', 'idt_B']
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
         visual_names_A = ['real_A_center_sag', 'fake_B_center_sag', 'rec_A_center_sag', 'empty_img_1']
         visual_names_A += ['real_A_center_cor', 'fake_B_center_cor', 'rec_A_center_cor', 'empty_img_2']
@@ -100,6 +103,7 @@ class CycleGAN3dModel(BaseModel):
         # define networks (both Generators and discriminators)
         # The naming is different from those used in the paper.
         # Code (vs. paper): G_A (G), G_B (F), D_A (D_Y), D_B (D_X)
+        print()
         self.netG_A = networks3d.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
                                         not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
         self.netG_B = networks3d.define_G(opt.output_nc, opt.input_nc, opt.ngf, opt.netG, opt.norm,
@@ -139,7 +143,15 @@ class CycleGAN3dModel(BaseModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
-        self.image_paths = input['A_paths' if AtoB else 'B_paths']
+
+        self.patient = input['Patient']
+        self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
+        self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
+
+        affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
+                                                                       self.real_B.shape[-3:],
+                                                                       self.real_B.dtype,
+                                                                       device=self.device)
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -147,6 +159,28 @@ class CycleGAN3dModel(BaseModel):
         self.rec_A = self.netG_B(self.fake_B)   # G_B(G_A(A))
         self.fake_A = self.netG_B(self.real_B)  # G_B(B)
         self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
+
+
+    def compute_D_loss(self,netD,real, fake):
+        # Real
+        pred_real = netD(real)
+        loss_D_real = self.criterionGAN(pred_real, True)
+        # Fake
+        pred_fake = netD(fake.detach())
+        loss_D_fake = self.criterionGAN(pred_fake, False)
+        # Combined loss and calculate gradients
+        loss_D = (loss_D_real + loss_D_fake) * 0.5
+        return loss_D
+
+    def compute_D_A_loss(self):
+        fake_B = self.fake_B_pool.query(self.fake_B)
+        self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
+
+    def compute_D_B_loss(self):
+        """Calculate GAN loss for discriminator D_B"""
+        fake_A = self.fake_A_pool.query(self.fake_A)
+        self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A)
+
 
     def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
@@ -207,7 +241,7 @@ class CycleGAN3dModel(BaseModel):
         self.loss_cycle_B = self.criterionCycle(self.rec_B, self.real_B) * lambda_B
         # combined loss and calculate gradients
         self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
-        self.loss_G.backward()
+        #self.loss_G.backward()
 
     def optimize_parameters(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
@@ -225,52 +259,80 @@ class CycleGAN3dModel(BaseModel):
         self.backward_D_B()      # calculate graidents for D_B
         self.optimizer_D.step()  # update D_A and D_B's weights
 
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False):
+        image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
+        image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
+        image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
+
+
+        if save_gif:
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real A", max_out=85,
+                                             image_tensor=image.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Real B", max_out=85,
+                                             image_tensor=image2.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+            img2tensorboard.add_animated_gif(writer=writer, scale_factor=256, tag="GAN/Fake B", max_out=85,
+                                             image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
+                                             global_step=global_step)
+
+        axs, fig = vxm.torch.utils.init_figure(3, 6)
+        vxm.torch.utils.set_axs_attribute(axs)
+        vxm.torch.utils.fill_subplots(self.fake_A.detach().cpu(), axs=axs[0, :], img_name='fakeA')
+        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[1, :], img_name='A')
+        vxm.torch.utils.fill_subplots(self.rec_A.cpu(), axs=axs[2, :], img_name='recA')
+
+        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[3, :], img_name='fakeB')
+        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[4, :], img_name='B')
+        vxm.torch.utils.fill_subplots(self.rec_B.cpu(), axs=axs[5, :], img_name='recB')
+
+
+        if use_image_name:
+            tag = f'{self.patient}/GAN'
+        else:
+            tag = 'GAN'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+
+        if losses is not None:
+            for key in losses:
+                writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""
         n_c = self.real_A.shape[2]
+        # average over channel to get the real and fake image
         self.real_A_center_sag = self.real_A[:, :, int(n_c / 2), ...]
         self.fake_B_center_sag = self.fake_B[:, :, int(n_c / 2), ...]
+        self.fake_A_center_sag = self.fake_A[:, :, int(n_c / 2), ...]
+        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
         self.rec_A_center_sag = self.rec_A[:, :, int(n_c / 2), ...]
+        self.rec_B_center_sag = self.rec_B[:, :, int(n_c / 2), ...]
+        self.idt_B_center_sag = self.idt_B[:, :, int(n_c / 2), ...]
+        self.idt_A_center_sag = self.idt_A[:, :, int(n_c / 2), ...]
+
 
         n_c = self.real_A.shape[3]
         self.real_A_center_cor = self.real_A[:, :, :, int(n_c / 2), ...]
         self.fake_B_center_cor = self.fake_B[:, :, :, int(n_c / 2), ...]
+        self.fake_A_center_cor = self.fake_A[:, :, :, int(n_c / 2), ...]
+        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
         self.rec_A_center_cor = self.rec_A[:, :, :, int(n_c / 2), ...]
+        self.rec_B_center_cor = self.rec_B[:, :, :, int(n_c / 2), ...]
+        self.idt_B_center_cor = self.idt_B[:, :, :, int(n_c / 2), ...]
+        self.idt_A_center_cor = self.idt_A[:, :, :, int(n_c / 2), ...]
 
         n_c = self.real_A.shape[4]
         self.real_A_center_axi = self.real_A[..., int(n_c / 2)]
         self.fake_B_center_axi = self.fake_B[..., int(n_c / 2)]
-        self.rec_A_center_axi = self.rec_A[..., int(n_c / 2)]
-
-        n_c = self.real_B.shape[2]
-        self.real_B_center_sag = self.real_B[:, :, int(n_c / 2), ...]
-        self.fake_A_center_sag = self.fake_A[:, :, int(n_c / 2), ...]
-        self.rec_B_center_sag = self.rec_B[:, :, int(n_c / 2), ...]
-
-        n_c = self.real_B.shape[3]
-        self.real_B_center_cor = self.real_B[:, :, :, int(n_c / 2), ...]
-        self.fake_A_center_cor = self.fake_A[:, :, :, int(n_c / 2), ...]
-        self.rec_B_center_cor = self.rec_B[:, :, :, int(n_c / 2), ...]
-
-        n_c = self.real_B.shape[4]
-        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
         self.fake_A_center_axi = self.fake_A[..., int(n_c / 2)]
+        self.real_B_center_axi = self.real_B[..., int(n_c / 2)]
+        self.rec_A_center_axi = self.rec_A[..., int(n_c / 2)]
         self.rec_B_center_axi = self.rec_B[..., int(n_c / 2)]
+        self.idt_B_center_axi = self.idt_B[..., int(n_c / 2)]
+        self.idt_A_center_axi = self.idt_A[..., int(n_c / 2)]
 
-        if self.isTrain and self.opt.lambda_identity > 0.0:  # if identity loss is used, we also visualize idt_B=G_A(B) ad idt_A=G_A(B)
-            n_c = self.idt_A.shape[2]
-            self.idt_B_center_sag = self.idt_B[:, :, int(n_c / 2), ...]
-            self.idt_A_center_sag = self.idt_A[:, :, int(n_c / 2), ...]
 
-            self.idt_B_center_cor = self.idt_B[:, :, :, int(n_c / 2), ...]
-            self.idt_A_center_cor = self.idt_A[:, :, :, int(n_c / 2), ...]
 
-            self.idt_B_center_axi = self.idt_B[..., int(n_c / 2)]
-            self.idt_A_center_axi = self.idt_A[..., int(n_c / 2)]
-        else:
-            self.empty_img_1 = torch.zeros_like(self.real_A_center_axi)
-            self.empty_img_2 = torch.zeros_like(self.real_A_center_axi)
-            self.empty_img_3 = torch.zeros_like(self.real_A_center_axi)
-            self.empty_img_4 = torch.zeros_like(self.real_A_center_axi)
-            self.empty_img_5 = torch.zeros_like(self.real_A_center_axi)
-            self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
+
+
