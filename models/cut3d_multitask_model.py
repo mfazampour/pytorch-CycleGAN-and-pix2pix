@@ -86,6 +86,8 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
 
         self.add_visdom_names(self.loss_names, self.visual_names)
 
+        self.loss_functions = ['backward_G', 'compute_D_loss']
+
         self.add_networks(opt, self.model_names, self.loss_functions, self.gpu_ids)
 
         if self.isTrain:
@@ -146,7 +148,7 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
         if self.opt.use_rigid_branch:
             self.set_requires_grad(self.netRigidReg, True)
             self.optimizer_RigidReg.zero_grad()
-            self.backward_RigidReg(self.fake_B)
+            self.backward_RigidReg()
             self.optimizer_RigidReg.step()
 
         # update deformable registration and segmentation network
@@ -157,8 +159,7 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
             self.set_requires_grad(self.netSeg, True)
             self.optimizer_DefReg.zero_grad()
             self.optimizer_Seg.zero_grad()
-            fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
-            self.backward_DefReg_Seg(fixed, self.fake_B, self.real_B)  # only back propagate through fake_B once
+            self.backward_DefReg_Seg()  # only back propagate through fake_B once
             self.optimizer_DefReg.step()
             self.optimizer_Seg.step()
 

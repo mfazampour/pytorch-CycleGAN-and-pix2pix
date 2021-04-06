@@ -826,10 +826,14 @@ class pix2pixHDMultitaskModel(pix2pixHDModel):
             self.first_phase_coeff = 0
 
 
-    def log_tensorboard(self,status, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
                         save_gif=True, use_image_name=False):
         super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
                                 save_gif=save_gif, use_image_name=use_image_name)
+        if self.eval():
+            self.status = "val/"
+        else:
+            self.status = "train/"
 
         self.add_rigid_figures(global_step=global_step, writer=writer, use_image_name=use_image_name)
 
@@ -837,7 +841,7 @@ class pix2pixHDMultitaskModel(pix2pixHDModel):
 
         self.add_deformable_figures(global_step=global_step, writer=writer, use_image_name=use_image_name)
 
-        self.add_landmark_losses(status=status,global_step=global_step, writer=writer)
+        self.add_landmark_losses(status=self.status, global_step=global_step, writer=writer)
 
 
 

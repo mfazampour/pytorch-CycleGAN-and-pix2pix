@@ -132,7 +132,7 @@ class Multitask:
 
     def add_optimizers(self, optimizers):
         self.criterionRigidReg = networks.RegistrationLoss()
-        self.optimizer_RigidReg = torch.optim.Adam(self.netRigidReg.parameters(), lr=opt.lr_Reg,
+        self.optimizer_RigidReg = torch.optim.Adam(self.netRigidReg.parameters(), lr=self.opt.lr_Reg,
                                                    betas=(self.opt.beta1, 0.999))
         optimizers.append(self.optimizer_RigidReg)
 
@@ -228,6 +228,11 @@ class Multitask:
         self.compute_gt_dice()
         self.compute_landmark_loss()
 
+        self.fake_B = fake_B
+        self.fixed = fixed
+        self.real_A = real_A
+        self.real_B = real_B
+
 
     def compute_gt_dice(self):
         """
@@ -305,12 +310,13 @@ class Multitask:
             loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
         return loss_G
 
-    def backward_RigidReg(self, fake_B):
+    def backward_RigidReg(self):
         """
         Calculate Segmentation loss to update the segmentation networks
         Returns
         -------
         """
+        fake_B = self.fake_B
         reg_A_params = self.netRigidReg(torch.cat([fake_B.detach(), self.deformed_B], dim=1))
         self.loss_RigidReg_fake = self.criterionRigidReg(reg_A_params,
                                                          self.gt_vector) * self.opt.lambda_Reg  # to be of the same order as loss_G_Seg
@@ -321,7 +327,8 @@ class Multitask:
         if torch.is_grad_enabled():
             self.loss_RigidReg.backward()
 
-    def backward_DefReg_Seg(self, fixed, fake_B, real_B):
+    def backward_DefReg_Seg(self):
+        fixed, fake_B, real_B = self.fixed, self.fake_B, self.real_B
         # fixed = self.idt_B.detach() if self.opt.reg_idt_B else self.real_B
         def_reg_output = self.netDefReg(fake_B.detach() * 0.5 + 0.5, fixed * 0.5 + 0.5)  # fake_B is the moving image here
         if self.opt.bidir:
@@ -547,3 +554,6 @@ class Multitask:
         if self.loss_warped_dice is not None:
             writer.add_scalar(self.status + 'DICE/deformed', scalar_value=self.loss_warped_dice,
                               global_step=global_step)
+
+    def get_current_landmark_distances(self):
+        return self.loss_landmarks_beginning , self.loss_landmarks_rigid, self.loss_landmarks_def

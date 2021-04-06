@@ -100,8 +100,7 @@ if __name__ == '__main__':
                 model.compute_landmark_loss()
                 model.compute_gt_dice()
                 model.train()  # change networks back to train mode
-                if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard("train",writer,losses, total_iters, save_gif=False)
+                model.log_tensorboard(writer,losses, total_iters, save_gif=False)
 
             if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
@@ -135,8 +134,7 @@ if __name__ == '__main__':
                         land_def.append(landmarks_def.item())
                         model.compute_landmark_loss()
                         model.compute_gt_dice()
-                        if hasattr(model, 'log_tensorboard'):
-                            model.log_tensorboard(status="valid",writer=writer,losses=None, global_step=total_iters, save_gif=False, use_image_name=True)
+                        model.log_tensorboard(writer=writer,losses=None, global_step=total_iters, save_gif=False, use_image_name=True)
                     keys = losses.keys()
 
                 for key in keys:
