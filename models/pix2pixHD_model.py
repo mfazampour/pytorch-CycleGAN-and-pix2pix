@@ -21,7 +21,7 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 # sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
 
 
-class pix2pixHDModel(BaseModel):
+class Pix2PixHDModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
