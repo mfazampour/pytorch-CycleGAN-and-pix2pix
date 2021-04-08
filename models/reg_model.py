@@ -371,15 +371,8 @@ class RegModel(BaseModel):
             self.first_phase_coeff = 0
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
+                        save_gif=True, use_image_name=False, mode=''):
         super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
-                                save_gif=save_gif, use_image_name=use_image_name)
-
-        self.add_rigid_figures(global_step, writer, use_image_name=use_image_name)
-
-        self.add_segmentation_figures(global_step, writer, use_image_name=use_image_name)
-
-        self.add_deformable_figures(global_step, writer, use_image_name=use_image_name)
-
+                                save_gif=save_gif, use_image_name=use_image_name, mode=mode)
 
 

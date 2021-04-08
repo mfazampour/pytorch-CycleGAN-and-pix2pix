@@ -322,5 +322,5 @@ class BaseModel(ABC):
             getattr(self, fun)()
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
+                        save_gif=True, use_image_name=False, mode=''):
         pass

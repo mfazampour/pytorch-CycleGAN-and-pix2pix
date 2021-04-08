@@ -10,7 +10,8 @@ from models import create_model
 from util.visualizer import Visualizer
 from torch.utils.tensorboard import SummaryWriter
 
-if __name__ == '__main__':
+
+def main():
     parser = TrainOptions()
     opt = parser.parse()  # get training options
 
@@ -49,7 +50,6 @@ if __name__ == '__main__':
     os.makedirs(opt.tensorboard_path, exist_ok=True)
     writer = SummaryWriter(opt.tensorboard_path)
 
-
     for epoch in range(opt.epoch_count,
                        opt.n_epochs + opt.n_epochs_decay + 1):  # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
         epoch_start_time = time.time()  # timer for entire epoch
@@ -64,9 +64,8 @@ if __name__ == '__main__':
             if total_iters % opt.print_freq == 0:
                 t_data = iter_start_time - iter_data_time
 
-            batch_size = data["A"].size(0)
-            total_iters += batch_size
-            epoch_iter += batch_size
+            total_iters += opt.batch_size
+            epoch_iter += opt.batch_size
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
             optimize_start_time = time.time()
@@ -80,67 +79,27 @@ if __name__ == '__main__':
 
             if len(opt.gpu_ids) > 0:
                 torch.cuda.synchronize()
-            new_time = (time.time() - optimize_start_time) / batch_size
+            new_time = (time.time() - optimize_start_time) / opt.batch_size
             optimize_time = new_time * 0.5 if optimize_time == -1 else new_time * 0.02 + 0.98 * optimize_time
 
-         #   model.save_smallest_network()
             if total_iters % opt.print_freq == 0:  # print training losses and save logging information to the disk
                 losses = model.get_current_losses()
                 visualizer.print_current_losses(epoch, epoch_iter, losses, optimize_time, t_data)
 
-            if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
-                losses = model.get_current_losses()  # read losses before setting to no_grad for validation
-                data = data
-                model.eval()  # change networks to eval mode
-                with torch.no_grad():
-                    model.set_input(data)  # unpack data from data loader
-                    model.test()  # run inference
-                save_result = total_iters % opt.update_html_freq == 0
-                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
-                model.compute_landmark_loss()
-                model.compute_gt_dice()
-                model.train()  # change networks back to train mode
-                model.log_tensorboard(writer,losses, total_iters, save_gif=False)
+            # display images on visdom and save images to a HTML file
+            if total_iters % opt.display_freq == 0:
+                display_results(data, epoch, model, opt, total_iters, visualizer, writer)
 
-            if total_iters % opt.save_latest_freq == 0:  # cache our latest model every <save_latest_freq> iterations
+            # cache our latest model every <save_latest_freq> iterations
+            if total_iters % opt.save_latest_freq == 0:
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
                 print(opt.name)  # it's useful to occasionally show the experiment name on console
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
 
+            # evaluate model performance every evalutate_freq iterations
             if total_iters % opt.evalutate_freq == 0:
-                print('evaluating model on labeled data')
-                losses_total = []
-                keys = []
-                loss_aggregate = {}
-                land_rig = []
-                land_def = []
-                land_beg = []
-                for j, (val_data) in enumerate(dataset_val):
-                    model.eval()  # change networks to eval mode
-                    if j > 5:
-                        break
-                    with torch.no_grad():
-                        model.set_input(val_data)  # unpack data from data loader
-                        model.forward()  # run inference
-                        model.calculate_loss_values()  # get the loss values
-                        model.compute_visuals()
-                        losses = model.get_current_losses()
-                        losses_total.append(losses)
-                        model.get_current_visuals()
-                        landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
-                        land_beg.append(landmarks_beg.item())
-                        land_rig.append(landmarks_rig.item())
-                        land_def.append(landmarks_def.item())
-                        model.compute_landmark_loss()
-                        model.compute_gt_dice()
-                        model.log_tensorboard(writer=writer,losses=None, global_step=total_iters, save_gif=False, use_image_name=True)
-                    keys = losses.keys()
-
-                for key in keys:
-                    loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
-                for key in loss_aggregate:
-                    writer.add_scalar(f'val-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
+                evaulate_model(dataset_val, model, total_iters, writer)
             iter_data_time = time.time()
 
         if epoch % opt.save_epoch_freq == 0:  # cache our model every <save_epoch_freq> epochs
@@ -151,3 +110,57 @@ if __name__ == '__main__':
         print('End of epoch %d / %d \t Time Taken: %d sec' % (
             epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
         model.update_learning_rate(epoch=epoch)  # update learning rates at the end of every epoch.
+
+
+def display_results(data, epoch, model, opt, total_iters, visualizer, writer):
+    losses = model.get_current_losses()  # read losses before setting to no_grad for validation
+    data = data
+    model.eval()  # change networks to eval mode
+    with torch.no_grad():
+        model.set_input(data)  # unpack data from data loader
+        model.test()  # run inference
+    save_result = total_iters % opt.update_html_freq == 0
+    visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
+    model.compute_landmark_loss()
+    model.compute_gt_dice()
+    model.train()  # change networks back to train mode
+    model.log_tensorboard(writer, losses, total_iters, save_gif=False)
+
+
+def evaulate_model(dataset_val, model, total_iters, writer):
+    print('evaluating model on labeled data')
+    losses_total = []
+    keys = []
+    loss_aggregate = {}
+    land_rig = []
+    land_def = []
+    land_beg = []
+    for j, (val_data) in enumerate(dataset_val):
+        model.eval()  # change networks to eval mode
+        if j > 5:
+            break
+        with torch.no_grad():
+            model.set_input(val_data)  # unpack data from data loader
+            model.forward()  # run inference
+            model.calculate_loss_values()  # get the loss values
+            model.compute_visuals()
+            losses = model.get_current_losses()
+            losses_total.append(losses)
+            model.get_current_visuals()
+            landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
+            land_beg.append(landmarks_beg.item())
+            land_rig.append(landmarks_rig.item())
+            land_def.append(landmarks_def.item())
+            model.compute_landmark_loss()
+            model.compute_gt_dice()
+            model.log_tensorboard(writer=writer, losses=None, global_step=total_iters, save_gif=False,
+                                  use_image_name=True, mode='val')
+        keys = losses.keys()
+    for key in keys:
+        loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
+    for key in loss_aggregate:
+        writer.add_scalar(f'val-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
+
+
+if __name__ == '__main__':
+    main()

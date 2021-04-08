@@ -83,7 +83,8 @@ class SegmentationModel(BaseModel):
         self.backward()              # calculate gradients for network G
         self.optimizer.step()        # update gradients for network G
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False, mode=''):
         for key in losses:
             writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
         seg_A = torch.argmax(self.seg_A, dim=1, keepdim=True)

@@ -26,7 +26,7 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 
-class pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
+class Pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
@@ -63,7 +63,7 @@ class pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
         We convert the Lab image 'real_B' (inherited from Pix2pixModel) to a RGB image 'real_B_rgb'.
         we convert the Lab image 'fake_B' (inherited from Pix2pixModel) to a RGB image 'fake_B_rgb'.
         """
-        super(pix2PixHDMultitaskModel, self).__init__(opt)
+        super(Pix2PixHDMultitaskModel, self).__init__(opt)
         self.add_visdom_names(self.loss_names, self.visual_names)
 
         self.loss_functions = ['backward_G', 'compute_D_loss']
@@ -75,7 +75,7 @@ class pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
 
     def set_input(self, input):
         self.clean_tensors()
-        super(pix2PixHDMultitaskModel, self).set_input(input)
+        super(Pix2PixHDMultitaskModel, self).set_input(input)
         self.set_mt_input(input, real_B=self.real_B, shape=self.real_B.shape,
                           dtype=self.real_B.dtype, device=self.real_B.device)
         self.init_loss_tensors()
@@ -176,16 +176,12 @@ class pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
 
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
-        if self.eval():
-            self.status = "val/"
-        else:
-            self.status = "train/"
+                        save_gif=True, use_image_name=False, mode=''):
         super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
-                                save_gif=save_gif, use_image_name=use_image_name)
+                                save_gif=save_gif, use_image_name=use_image_name, mode=mode)
 
         self.log_mt_tensorboard(self.real_A, self.real_B, self.fake_B, writer, losses, global_step,
-                                use_image_name, self.status)
+                                use_image_name, mode)
 
 
 

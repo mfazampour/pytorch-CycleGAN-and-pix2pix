@@ -435,17 +435,16 @@ class Multitask:
 
 
     def log_mt_tensorboard(self, real_A, real_B, fake_B, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                            use_image_name=False, status='val/'):
-        self.status = status
-        self.add_rigid_figures(global_step, writer, use_image_name=use_image_name)
+                           use_image_name=False, mode=''):
+        self.add_rigid_figures(mode, global_step, writer, use_image_name=use_image_name)
 
-        self.add_segmentation_figures(fake_B, real_B, global_step, writer, use_image_name=use_image_name)
+        self.add_segmentation_figures(mode, fake_B, real_B, global_step, writer, use_image_name=use_image_name)
 
-        self.add_deformable_figures(real_A, real_B, global_step, writer, use_image_name=use_image_name)
+        self.add_deformable_figures(mode, real_A, real_B, global_step, writer, use_image_name=use_image_name)
 
-        self.add_landmark_losses(global_step, writer, use_image_name=use_image_name)
+        self.add_landmark_losses(mode, global_step, writer, use_image_name=use_image_name)
 
-    def add_deformable_figures(self, real_A, real_B, global_step, writer, use_image_name=False):
+    def add_deformable_figures(self, mode, real_A, real_B, global_step, writer, use_image_name=False):
         n = 8 if self.mask_B is None else 10
         axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
@@ -484,12 +483,12 @@ class Multitask:
             vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[9, :], img_name='mask warped on US', cmap=None)
         #
         if use_image_name:
-            tag = self.status + f'{self.patient}/Deformable'
+            tag = mode + f'{self.patient}/Deformable'
         else:
-            tag = self.status + 'Deformable'
+            tag = mode + 'Deformable'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-    def add_rigid_figures(self, global_step, writer, use_image_name=False):
+    def add_rigid_figures(self, mode, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 4)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
@@ -498,12 +497,12 @@ class Multitask:
         vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
 
         if use_image_name:
-            tag = self.status + f'{self.patient}/Rigid'
+            tag = mode + f'{self.patient}/Rigid'
         else:
-            tag = self.status + 'Rigid'
+            tag = mode + 'Rigid'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-    def add_segmentation_figures(self, fake_B, real_B, global_step, writer, use_image_name=False):
+    def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 7)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
@@ -529,30 +528,30 @@ class Multitask:
         overlay[overlay > 1] = 1
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
         if use_image_name:
-            tag = self.status + f'{self.patient}/Segmentation'
+            tag = mode + f'{self.patient}/Segmentation'
         else:
-            tag = self.status + 'Segmentation'
+            tag = mode + 'Segmentation'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
-    def add_landmark_losses(self, global_step, writer, use_image_name=False):
+    def add_landmark_losses(self, mode, global_step, writer, use_image_name=False):
 
         if self.loss_landmarks_rigid_diff is not None:
-            writer.add_scalar(self.status + 'landmarks/difference_rigid',
+            writer.add_scalar(mode + 'landmarks/difference_rigid',
                               scalar_value=self.loss_landmarks_rigid_diff,
                               global_step=global_step)
         if self.loss_landmarks_rigid is not None:
-            writer.add_scalar(self.status + 'landmarks/rigid', scalar_value=self.loss_landmarks_rigid,
+            writer.add_scalar(mode + 'landmarks/rigid', scalar_value=self.loss_landmarks_rigid,
                               global_step=global_step)
         if self.loss_landmarks_def is not None:
-            writer.add_scalar(self.status + 'landmarks/def', scalar_value=self.loss_landmarks_def,
+            writer.add_scalar(mode + 'landmarks/def', scalar_value=self.loss_landmarks_def,
                               global_step=global_step)
         if self.loss_landmarks_def_diff is not None:
-            writer.add_scalar(self.status + 'landmarks/difference_def', scalar_value=self.loss_landmarks_def_diff,
+            writer.add_scalar(mode + 'landmarks/difference_def', scalar_value=self.loss_landmarks_def_diff,
                               global_step=global_step)
         if self.diff_dice is not None:
-            writer.add_scalar(self.status + 'DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
+            writer.add_scalar(mode + 'DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
         if self.loss_warped_dice is not None:
-            writer.add_scalar(self.status + 'DICE/deformed', scalar_value=self.loss_warped_dice,
+            writer.add_scalar(mode + 'DICE/deformed', scalar_value=self.loss_warped_dice,
                               global_step=global_step)
 
     def get_current_landmark_distances(self):
