@@ -185,7 +185,8 @@ class Pix2Pix3dSegModel(Pix2Pix3dModel):
         self.empty_img_6 = torch.zeros_like(self.real_A_center_axi)
 
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict, global_step: int = 0):
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False, mode=''):
         axs, fig = vxm.torch.utils.init_figure(3, 6)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')

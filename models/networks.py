@@ -1728,8 +1728,9 @@ class DiceLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, predict: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if len(target.unique()) != predict.shape[1]:  # the number of classes in target doesn't match the predict
-            return torch.tensor([-1.0], device=predict.device)
+        with torch.no_grad():
+            if len(target.unique()) != predict.shape[1]:  # the number of classes in target doesn't match the predict
+                return torch.tensor([-1.0], device=predict.device)
         if predict.shape[1] != target.shape[1]:
             target_ = target.view(target.shape[0], target.shape[1], -1)
             target_ = F.one_hot(target_.to(torch.int64))

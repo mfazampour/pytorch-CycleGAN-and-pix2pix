@@ -114,9 +114,7 @@ if __name__ == '__main__':
             dice_dif.append(loss_diff_dice)
             dice_move.append(loss_moving_dice)
             dice_warp.append(loss_warped_dice)
-
-            if hasattr(model, 'log_tensorboard'):
-                model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+            model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True, mode='test')
         keys = losses.keys()
 
     with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_def' + '.csv', 'w',
@@ -170,9 +168,7 @@ if __name__ == '__main__':
                 dice_dif.append(loss_diff_dice)
                 dice_move.append(loss_moving_dice)
                 dice_warp.append(loss_warped_dice)
-
-                if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+                model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True, mode='test')
             keys = losses.keys()
 
         with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'test_landmarks_def' + '.csv', 'w',
@@ -224,9 +220,7 @@ if __name__ == '__main__':
                 dice_dif.append(loss_diff_dice)
                 dice_move.append(loss_moving_dice)
                 dice_warp.append(loss_warped_dice)
-
-                if hasattr(model, 'log_tensorboard'):
-                    model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True)
+                model.log_tensorboard(writer, None, j, save_gif=False, use_image_name=True, mode='val')
             keys = losses.keys()
 
         with open(opt.checkpoints_dir + "/" + opt.model + "_" + 'val_landmarks_def' + '.csv', 'w',

@@ -21,7 +21,7 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 # sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
 
 
-class pix2pixHDModel(BaseModel):
+class Pix2PixHDModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser: argparse.ArgumentParser, is_train=True):
@@ -405,7 +405,7 @@ class pix2pixHDModel(BaseModel):
 
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
+                        save_gif=True, use_image_name=False, mode=''):
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
@@ -428,9 +428,9 @@ class pix2pixHDModel(BaseModel):
         vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
         if use_image_name:
-            tag = f'{self.patient}/GAN'
+            tag = mode + f'{self.patient}/GAN'
         else:
-            tag = 'GAN'
+            tag = mode + 'GAN'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:

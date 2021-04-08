@@ -164,7 +164,6 @@ class CUT3dModel(BaseModel):
         """
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
-        print(f"size of A {self.real_A.size}")
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device)
@@ -266,7 +265,7 @@ class CUT3dModel(BaseModel):
         return total_nce_loss / n_layers
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
+                        save_gif=True, use_image_name=False, mode=''):
         image = torch.add(torch.mul(self.real_A, 0.5), 0.5)
         image2 = torch.add(torch.mul(self.real_B, 0.5), 0.5)
         image3 = torch.add(torch.mul(self.fake_B, 0.5), 0.5)
@@ -292,9 +291,9 @@ class CUT3dModel(BaseModel):
         vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
         vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
         if use_image_name:
-            tag = f'{self.patient}/GAN'
+            tag = mode + f'{self.patient}/GAN'
         else:
-            tag = 'GAN'
+            tag = mode + 'GAN'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:

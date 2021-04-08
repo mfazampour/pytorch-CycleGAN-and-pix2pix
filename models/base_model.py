@@ -4,6 +4,9 @@ from inspect import getmembers, isfunction
 import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
+
+from torch.utils.tensorboard import SummaryWriter
+
 from models import networks
 
 #
@@ -317,3 +320,7 @@ class BaseModel(ABC):
         """
         for fun in self.loss_functions:
             getattr(self, fun)()
+
+    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+                        save_gif=True, use_image_name=False, mode=''):
+        pass
