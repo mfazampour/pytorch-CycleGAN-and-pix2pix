@@ -217,7 +217,9 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         else:
             net = G_Resnet3d(input_nc, output_nc, nz, num_downs=n_layers, n_res=n_blocks - 4, ngf=ngf, norm='inst', nl_layer='relu')
     elif netG == 'drit':
-        net = G3d(input_nc, output_nc, opt.mlp_nc, opt.output_nc_attr, n_layers=opt.n_layers_cont, norm=opt.norm_gen)
+        net = G3d(input_nc, output_nc, opt.mlp_nc, opt.output_nc_attr, n_layers=opt.n_layers_cont, norm=opt.norm_gen, orig_drit=False)
+    elif netG == 'drit_orig':
+        net = G3d(input_nc, output_nc, opt.mlp_nc, opt.output_nc_attr, n_layers=opt.n_layers_cont, norm=opt.norm_gen, orig_drit=True)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netG))
@@ -285,6 +287,10 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = PixelDiscriminator3d(input_nc, ndf, norm_layer=norm_layer)
     elif netD == 'multiscale':
         net = MultiScaleDis3d(input_nc, ndf, opt.n_scale, n_layers_D, norm=norm, activ='lrelu')
+    elif netD == 'dis_drit':
+        net = Dis3d(input_nc, ndf, n_layers=n_layers_D, activ='lrelu')
+    elif netD == 'dis_cont':
+        net = DisContent3d(input_nc, activ='lrelu')
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -313,6 +319,8 @@ def define_E(input_nc, output_nc, ndf, netE, n_layers=3, activ='relu', norm='bat
         net = E_content3d(input_nc, output_nc, ndf, n_layers, n_res=3, norm=norm, pad_type=pad_type)
     elif netE == 'attribute':
         net = E_attr3d(input_nc, output_nc, ndf, n_layers, activ=activ, norm=norm)
+    elif netE == 'content_orig':
+        net = E_content3d_Orig(input_nc, output_nc, ndf, n_layers, n_res=3, norm=norm, pad_type=pad_type)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netE)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -845,7 +853,7 @@ class ResnetGenerator3d(nn.Module):
 
 
 class G3d(nn.Module):
-    def __init__(self, input_dim, output_nc, mlp_dim, style_dim, n_layers=2, norm='none'):
+    def __init__(self, input_dim, output_nc, mlp_dim, style_dim, n_layers=2, norm='none', orig_drit=False):
         super(G3d, self).__init__()
         tch_add = input_dim
         tch = input_dim
@@ -855,23 +863,41 @@ class G3d(nn.Module):
         self.decA3 = MisINSResBlock3d(tch, tch_add)
         self.decA4 = MisINSResBlock3d(tch, tch_add)
 
-        self.decoder = []
-        n_res = 2
-        self.decoder += [ResBlocks3d(n_res, tch, norm, activation='lrelu', nz=0)]
-        for i in range(0, n_layers-1):
-            self.decoder += [ReLUINSConvTranspose3d(tch, tch // 2, kernel_size=3, stride=2, padding=1, output_padding=1)]
-            tch = tch // 2
-        self.decoder += [nn.Upsample(scale_factor=2, mode='trilinear'),
-                         Conv3dBlock(tch, tch // 2, kernel_size=3, stride=1, padding=1, activation='lrelu', norm=norm)]
-        self.decoder += [Conv3dBlock(tch // 2, output_nc, kernel_size=1, stride=1, padding=0, activation='tanh', norm='none')]
-        self.decoder = nn.Sequential(*self.decoder)
+        self.orig_drit = orig_drit
+        if not orig_drit:
+            self.decoder = []
+            n_res = 2
+            self.decoder += [ResBlocks3d(n_res, tch, norm, activation='lrelu', nz=0)]
+            for i in range(0, n_layers-1):
+                self.decoder += [ReLUINSConvTranspose3d(tch, tch // 2, kernel_size=3, stride=2, padding=1, output_padding=1)]
+                tch = tch // 2
+            self.decoder += [nn.Upsample(scale_factor=2, mode='trilinear'),
+                             Conv3dBlock(tch, tch // 2, kernel_size=3, stride=1, padding=1, activation='lrelu', norm=norm)]
+            self.decoder += [Conv3dBlock(tch // 2, output_nc, kernel_size=1, stride=1, padding=0, activation='tanh', norm='none')]
+            self.decoder = nn.Sequential(*self.decoder)
 
-        self.mlpA = nn.Sequential(
-            nn.Linear(style_dim, mlp_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(mlp_dim, mlp_dim * 2),
-            nn.ReLU(inplace=True),
-            nn.Linear(mlp_dim * 2, tch_add * 4))
+            self.mlpA = nn.Sequential(
+                nn.Linear(style_dim, mlp_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(mlp_dim, mlp_dim * 2),
+                nn.ReLU(inplace=True),
+                nn.Linear(mlp_dim * 2, tch_add * 4))
+
+        else:
+            self.conv1 = ReLUINSConvTranspose3d(tch, tch // 2, kernel_size=3, stride=2, padding=1, output_padding=1)
+            self.up2 = nn.Upsample(scale_factor=2, mode='trilinear')
+            self.conv2 = Conv3dBlock(tch // 2, tch // 4, kernel_size=3, stride=1, padding=1, activation='lrelu',
+                                     norm='none')
+            self.conv3 = Conv3dBlock(tch // 4, output_nc, kernel_size=1, stride=1, padding=0, activation='none',
+                                     norm='none')
+            self.act = nn.Tanh()
+
+            self.mlpA = nn.Sequential(
+                nn.Linear(style_dim, mlp_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(mlp_dim, mlp_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(mlp_dim, tch_add * 4))
 
     def forward(self, x, z):
 
@@ -885,7 +911,14 @@ class G3d(nn.Module):
         out3 = self.decA3(out2, z3)
         out4 = self.decA4(out3, z4)
 
-        out = self.decoder(out4)
+        if not self.orig_drit:
+            out = self.decoder(out4)
+        else:
+            out = self.conv1(out4)
+            out = self.up2(out)
+            out = self.conv2(out)
+            out = self.conv3(out)
+            out = self.act(out)
 
         return out
 
@@ -1169,6 +1202,25 @@ class PatchDiscriminator3d(NLayerDiscriminator3d):
 #
 #         return out
 
+class DisContent3d(nn.Module):
+    def __init__(self, input_dim, activ='lrelu'):
+        super(DisContent3d, self).__init__()
+        model = []
+        size = input_dim
+        activation = activ
+        model += [Conv3dBlock(size, size, kernel_size=5, stride=2, padding=1, norm='in', activation=activation)]
+        model += [Conv3dBlock(size, size, kernel_size=5, stride=2, padding=1, norm='in', activation=activation)]
+        model += [Conv3dBlock(size, size, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]
+        model += [Conv3dBlock(size, size, kernel_size=2, stride=1, padding=1, norm='none', activation=activation)]
+        model += [nn.Conv3d(size, 1, kernel_size=1, stride=1, padding=0)]
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        out = self.model(x)
+        out = out.view(-1)
+
+        return out
+
 
 class MultiScaleDis3d(nn.Module):
     def __init__(self, input_dim, ndf, n_scale: int, n_layer: int, activ='relu', norm='none'):
@@ -1207,53 +1259,44 @@ class MultiScaleDis3d(nn.Module):
         return outs
 
 
-# class Dis3d(nn.Module):
-#
-#     def __init__(self, input_dim, ndf, n_layers: int, activ='relu', no_antialias=False, sn=False):
-#         super(Dis3d, self).__init__()
-#         ch = ndf
-#         layers = n_layers
-#         activation = activ
-#         no_antialias = no_antialias
-#
-#         self.model = self._make_net(input_dim, ch, layers, activation, sn, no_antialias=no_antialias)
-#
-#     def _make_net(self, input_dim, ch, layers, activation, sn=False, no_antialias=False):
-#         model = []
-#
-#         if no_antialias:
-#             model += [Conv3dBlock(input_dim, ch, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]
-#         else:
-#             model += [Conv3dBlock(input_dim, ch, kernel_size=3, stride=1, padding=1, norm='in', activation=activation),
-#                       Downsample(ch)]
-#         tch = ch
-#         for i in range(1, layers - 1):
-#             if no_antialias:
-#                 model += [Conv3dBlock(tch, tch * 2, kernel_size=3, stride=2, padding=1, norm='in',
-#                                       activation=activation)]  # 8
-#             else:
-#                 model += [
-#                     Conv3dBlock(tch, tch * 2, kernel_size=3, stride=1, padding=1, norm='in', activation=activation),
-#                     Downsample(tch * 2)]
-#             tch *= 2
-#         model += [Conv3dBlock(tch, tch * 2, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]  # 2
-#         tch *= 2
-#         if sn:
-#             model += [nn.utils.spectral_norm(nn.Conv3d(tch, 1, kernel_size=1, stride=1, padding=0))]  # 1
-#         else:
-#             model += [nn.Conv3d(tch, 1, kernel_size=1, stride=1, padding=0)]  # 1
-#
-#         return nn.Sequential(*model)
-#
-#     def cuda(self, gpu):
-#         self.model.cuda(gpu)
-#
-#     def forward(self, x_A):
-#
-#         out_A = self.model(x_A)
-#         out_A = out_A.view(-1)
-#
-#         return out_A
+class Dis3d(nn.Module):
+
+    def __init__(self, input_dim, ndf, n_layers: int, activ='relu', no_antialias=False, sn=False):
+        super(Dis3d, self).__init__()
+        ch = ndf
+        layers = n_layers
+        activation = activ
+        no_antialias = no_antialias
+
+        self.model = self._make_net(input_dim, ch, layers, activation, sn, no_antialias=no_antialias)
+
+    def _make_net(self, input_dim, ch, layers, activation, sn=False, no_antialias=False):
+        model = []
+        model += [
+            Conv3dBlock(input_dim, ch, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]  # 16
+        tch = ch
+        for i in range(1, layers - 1):
+            model += [
+                Conv3dBlock(tch, tch * 2, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]  # 8
+            tch *= 2
+        model += [Conv3dBlock(tch, tch * 2, kernel_size=3, stride=2, padding=1, norm='in', activation=activation)]  # 2
+        tch *= 2
+        if sn:
+            model += [nn.utils.spectral_norm(nn.Conv3d(tch, 1, kernel_size=1, stride=1, padding=0))]  # 1
+        else:
+            model += [nn.Conv3d(tch, 1, kernel_size=1, stride=1, padding=0)]  # 1
+
+        return nn.Sequential(*model)
+
+    def cuda(self, gpu):
+        self.model.cuda(gpu)
+
+    def forward(self, x_A):
+
+        out_A = self.model(x_A)
+        out_A = out_A.view(-1)
+
+        return out_A
 
 
 ####################################################################
@@ -1511,6 +1554,56 @@ class E_content3d(nn.Module):
             dim *= 2
         encB_c += [Conv3dBlock(dim, output_dim, kernel_size=3, stride=1, padding=1, norm=norm,
                                activation='lrelu', pad_type='replicate')]
+        encB_c += [ResBlocks3d(n_res, output_dim, norm='in', activation='relu', pad_type=pad_type)]
+
+        self.shared = []
+        self.shared += [ResBlocks3d(2, output_dim, norm='in', activation='relu', pad_type=pad_type)]
+        self.shared += [GaussianNoiseLayer()]
+
+        self.encA = nn.Sequential(*encA_c)
+        self.encB = nn.Sequential(*encB_c)
+        self.shared = nn.Sequential(*self.shared)
+
+    def forward(self, xa, xb):
+        outputA = self.encA(xa)
+        outputB = self.encB(xb)
+
+        cont_a = self.shared(outputA)
+        cont_b = self.shared(outputB)
+
+        return cont_a, cont_b
+
+
+class E_content3d_Orig(nn.Module):
+    def __init__(self, input_dim, output_dim, ndf, n_downsample, n_res, norm='none', pad_type='replicate', sn=False):
+        super(E_content3d_Orig, self).__init__()
+        dim = ndf
+
+        encA_c = []
+        # change number of channels
+        encA_c += [Conv3dBlock(input_dim, dim, kernel_size=7, stride=1, padding=3, norm=norm,
+                               activation='lrelu', pad_type='replicate')]  # 80
+
+        for i in range(n_downsample):
+            encA_c += [Conv3dBlock(dim, dim * 2, kernel_size=4, stride=2, padding=1, norm=norm,
+                                   activation='relu', pad_type='replicate')]
+            dim *= 2
+
+        # encA_c += [Conv3dBlock(dim, output_dim, kernel_size=3, stride=1, padding=1, norm=norm,
+        #                        activation='lrelu', pad_type='replicate')]
+        encA_c += [ResBlocks3d(n_res, output_dim, norm='in', activation='relu', pad_type=pad_type)]
+
+        dim = ndf
+        encB_c = []
+        encB_c += [Conv3dBlock(input_dim, dim, kernel_size=7, stride=1, padding=3, norm=norm,
+                               activation='lrelu', pad_type='replicate')]
+        for i in range(n_downsample):
+            encB_c += [Conv3dBlock(dim, dim * 2, kernel_size=4, stride=2, padding=1, norm=norm,
+                                   activation='relu', pad_type='replicate')]
+            dim *= 2
+
+        # encB_c += [Conv3dBlock(dim, output_dim, kernel_size=3, stride=1, padding=1, norm=norm,
+        #                        activation='lrelu', pad_type='replicate')]
         encB_c += [ResBlocks3d(n_res, output_dim, norm='in', activation='relu', pad_type=pad_type)]
 
         self.shared = []

@@ -16,7 +16,7 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 
-class DRIT3dModel(BaseModel):
+class DRIT3dOrigModel(BaseModel):
     """ This class implements DRIT described in the paper
     DRIT++: Diverse image to image translation using disentangled representations
 
@@ -33,17 +33,17 @@ class DRIT3dModel(BaseModel):
         # content
         parser.add_argument('--output_nc_cont', type=int, default=64, help='output ch of content encoder')
         parser.add_argument('--ndf_cont', type=int, default=16, help='number of filters of content encoder')
-        parser.add_argument('--n_layers_cont', type=int, default=3, help='number of layers of content encoder')
+        parser.add_argument('--n_layers_cont', type=int, default=2, help='number of layers of content encoder')
         parser.add_argument('--norm_cont', type=str, default='none', help='norm layer of content encoder')
         parser.add_argument('--lr_content', type=float, default=0.0001, help='learning rate of the content encoder')
         parser.add_argument('--gan_mode_cont', type=str, default='vanilla', choices=['vanilla', 'lsgan', 'wgan', 'wgan-gp'], help='content gan adversarial loss')
         # attribute
-        parser.add_argument('--output_nc_attr', type=int, default=16, help='output ch of attribute encoder')
+        parser.add_argument('--output_nc_attr', type=int, default=8, help='output ch of attribute encoder')
         parser.add_argument('--ndf_attr', type=int, default=16, help='number of filters of attribute encoder')
-        parser.add_argument('--n_layers_attr', type=int, default=3, help='number of layers of attribute encoder')
-        parser.add_argument('--norm_attr', type=str, default='in', help='norm layer of attribute encoder')
+        parser.add_argument('--n_layers_attr', type=int, default=2, help='number of layers of attribute encoder')
+        parser.add_argument('--norm_attr', type=str, default='none', help='norm layer of attribute encoder')
         # generator
-        parser.add_argument('--mlp_nc', type=int, default=16, help='number of filters of mlp layer in generator')
+        parser.add_argument('--mlp_nc', type=int, default=128, help='number of filters of mlp layer in generator')
         parser.add_argument('--norm_gen', type=str, default='in', help='norm layer of generator')
 
         if is_train:
@@ -51,11 +51,12 @@ class DRIT3dModel(BaseModel):
             parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
             parser.add_argument('--n_scale', type=int, default=3, help='number of scales of the discriminator')
             parser.add_argument('--norm_d', type=str, default='in', help='norm layer of discriminator')
+
             # discriminator content
-            parser.add_argument('--ndcf', type=int, default=16, help='number of filters of disc content')
+            parser.add_argument('--ndcf', type=int, default=64, help='number of filters of disc content')
             parser.add_argument('--n_layers_d_cont', type=int, default=2, help='number of layers of disc content')
             parser.add_argument('--norm_d_cont', type=str, default='in', help='norm layer of disc content')
-            parser.add_argument('--netD_cont', type=str, default='n_layers', help='type of the disc content')
+            parser.add_argument('--netD_cont', type=str, default='dis_cont', help='type of the disc content')
             # losses
             parser.add_argument('--recon_loss', type=str, default='l1', choices=['l1', 'lcc'], help='type of the cycle consistency loss')
             parser.add_argument('--use_ms', action='store_true', help='use mode seeking loss')
@@ -74,7 +75,7 @@ class DRIT3dModel(BaseModel):
             parser.add_argument('--lambda_cont_gp', type=float, default=10.0, help='coeff of gradient penalization of cont. disc.')
 
 
-        parser.set_defaults(pool_size=0, dataset_mode='volume')  # no image pooling
+        parser.set_defaults(pool_size=0, dataset_mode='volume', netD='dis_drit')  # no image pooling
 
         return parser
 
@@ -98,7 +99,7 @@ class DRIT3dModel(BaseModel):
         # encoders
         # input_nc, output_nc, ndf, netE, n_layers=3, n_res=3, active='rely', norm='batch', pad_type='replicate',
         #              init_type='normal', init_gain=0.02, gpu_ids=[]
-        self.netEnc_c = networks3d.define_E(opt.input_nc, opt.output_nc_cont, opt.ndf_cont, 'content', opt.n_layers_cont,
+        self.netEnc_c = networks3d.define_E(opt.input_nc, opt.output_nc_cont, opt.ndf_cont, 'content_orig', opt.n_layers_cont,
                                             opt.activ, opt.norm_cont, opt.pad_type, opt.init_type,
                                             opt.init_gain, gpu_ids=self.gpu_ids)
         self.netEnc_attr_A = networks3d.define_E(opt.input_nc, opt.output_nc_attr, opt.ndf_attr, 'attribute',
@@ -117,6 +118,10 @@ class DRIT3dModel(BaseModel):
             self.netDis_A = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
             self.netDis_B = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+                                                opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
+            self.netDis_A2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+                                                opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
+            self.netDis_B2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
             self.netDis_cont = networks3d.define_D(opt.output_nc_cont, opt.ndcf, opt.netD_cont, opt.n_layers_d_cont,
                                                    opt.norm_d_cont, opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
@@ -255,10 +260,10 @@ class DRIT3dModel(BaseModel):
         # update disA
         self.disA_opt.zero_grad()
         loss_D1_A = self.backward_D(self.netDis_A, self.real_a_encoded, self.fake_a_encoded)
-        loss_D2_A = self.backward_D(self.netDis_A, self.real_a_random, self.fake_a_random)
+        loss_D2_A = self.backward_D(self.netDis_A2, self.real_a_random, self.fake_a_random)
         disA2_loss = loss_D2_A
         if self.opt.use_ms:
-            loss_D2_A2 = self.backward_D(self.netDis_A, self.real_a_random, self.fake_a_random2)
+            loss_D2_A2 = self.backward_D(self.netDis_A2, self.real_a_random, self.fake_a_random2)
             disA2_loss += loss_D2_A2
 
         loss_disA = (loss_D1_A + disA2_loss) / 2
@@ -269,10 +274,10 @@ class DRIT3dModel(BaseModel):
         # update disB
         self.disB_opt.zero_grad()
         loss_D1_B = self.backward_D(self.netDis_B, self.real_b_encoded, self.fake_b_encoded)
-        loss_D2_B = self.backward_D(self.netDis_B, self.real_b_random, self.fake_b_random)
+        loss_D2_B = self.backward_D(self.netDis_B2, self.real_b_random, self.fake_b_random)
         disB2_loss = loss_D2_B
         if self.opt.use_ms:
-            loss_D2_B2 = self.backward_D(self.netDis_B, self.real_b_random, self.fake_b_random2)
+            loss_D2_B2 = self.backward_D(self.netDis_B2, self.real_b_random, self.fake_b_random2)
             disB2_loss += loss_D2_B2
         loss_disB = (loss_D1_B + disB2_loss) / 2
         loss_disB.backward()
@@ -429,9 +434,9 @@ class DRIT3dModel(BaseModel):
         for i, (key) in enumerate(volumes):
             vxm.torch.utils.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
         if use_image_name:
-            tag = f'{self.patient[0]}/images'
+            tag = f'{self.patient[0]}/DRIT'
         else:
-            tag = 'images'
+            tag = 'DRIT'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:
