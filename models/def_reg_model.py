@@ -159,6 +159,10 @@ class DefRegModel(BaseModel):
     def forward(self):
         self.fixed = self.real_B[0:1, ...] * 0.5 + 0.5
         self.moving = self.real_B[1:2, ...] * 0.5 + 0.5
+
+        if self.mask_B is not None:
+            self.mask_fixed = self.mask_B[0:1, ...]
+            self.mask_moving = self.mask_B[1:0, ...]
         def_reg_output = self.netDefReg(self.moving, self.fixed, registration=not self.isTrain)
 
         if self.opt.bidir and self.isTrain:
@@ -184,7 +188,7 @@ class DefRegModel(BaseModel):
 
         """
         if self.mask_B is not None:
-            self.mask_def = self.transformer_label(self.mask_B[0:1, ...], self.dvf.detach())
+            self.mask_def = self.transformer_label(self.mask_moving, self.dvf.detach())
             shape = list(self.mask_B.shape)
             n = self.opt.num_classes  # number of classes
             shape[1] = n
@@ -192,9 +196,9 @@ class DefRegModel(BaseModel):
             one_hot_deformed = torch.zeros(shape, device=self.mask_B.device)
             one_hot_moving = torch.zeros(shape, device=self.mask_B.device)
             for i in range(n):
-                one_hot_fixed[:, i, self.mask_B[1, 0, ...] == i] = 1
+                one_hot_fixed[:, i, self.mask_fixed[1, 0, ...] == i] = 1
                 one_hot_deformed[:, i, self.mask_def[0, 0, ...] == i] = 1
-                one_hot_moving[:, i, self.mask_B[0, 0, ...] == i] = 1
+                one_hot_moving[:, i, self.mask_moving[0, 0, ...] == i] = 1
 
 
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
@@ -274,15 +278,15 @@ class DefRegModel(BaseModel):
         overlay[overlay > 1] = 1
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Deformed overlay', cmap=None)
         if self.mask_B is not None:
-            overlay = self.mask_B[1:2, ...].repeat(1, 3, 1, 1, 1)
-            overlay[:, 0:1, ...] = self.mask_B[0:1, ...].detach()
+            overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = self.mask_moving.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='mask moving on US', cmap=None)
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='mask moving on fixed', cmap=None)
 
-            overlay = self.mask_B[1:2, ...].repeat(1, 3, 1, 1, 1)
+            overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_def.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask warped on US', cmap=None)
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask warped on fixed', cmap=None)
         #
         if use_image_name:
             tag = mode + f'{self.patient}/Deformable'

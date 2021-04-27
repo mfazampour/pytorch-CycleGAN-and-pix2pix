@@ -50,6 +50,8 @@ params:
   name: DefReg
   output_nc: 1
   print_freq: 20
+  load_init_models: /data/Prostate_Reg_KM/multitask/def_reg_test/
+  epoch: latest
 
 run:
   cmd: GEOMSTATS_BACKEND=pytorch python train.py \\
@@ -72,4 +74,6 @@ run:
     --bidir \\
     --inshape 80 80 80 \\
     --similarity NCC \\
-    --evalutate_freq 10
+    --evalutate_freq 10 \\
+    --load_init_models {{ load_init_models }} \\
+    --epoch {{ epoch }}
