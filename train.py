@@ -9,7 +9,7 @@ from data import create_dataset
 from models import create_model
 from util.visualizer import Visualizer
 from torch.utils.tensorboard import SummaryWriter
-
+from models.multitask_parent import Multitask
 
 def main():
     parser = TrainOptions()
@@ -121,8 +121,9 @@ def display_results(data, epoch, model, opt, total_iters, visualizer, writer):
         model.test()  # run inference
     save_result = total_iters % opt.update_html_freq == 0
     visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
-    model.compute_landmark_loss()
-    model.compute_gt_dice()
+    if isinstance(model, Multitask):
+        model.compute_landmark_loss()
+        model.compute_gt_dice()
     model.train()  # change networks back to train mode
     model.log_tensorboard(writer, losses, total_iters, save_gif=False)
 
@@ -147,12 +148,13 @@ def evaulate_model(dataset_val, model, total_iters, writer):
             losses = model.get_current_losses()
             losses_total.append(losses)
             model.get_current_visuals()
-            landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
-            land_beg.append(landmarks_beg.item())
-            land_rig.append(landmarks_rig.item())
-            land_def.append(landmarks_def.item())
-            model.compute_landmark_loss()
-            model.compute_gt_dice()
+            if isinstance(model, Multitask):
+                landmarks_beg, landmarks_rig, landmarks_def = model.get_current_landmark_distances()
+                land_beg.append(landmarks_beg.item())
+                land_rig.append(landmarks_rig.item())
+                land_def.append(landmarks_def.item())
+                model.compute_landmark_loss()
+                model.compute_gt_dice()
             model.log_tensorboard(writer=writer, losses=None, global_step=total_iters, save_gif=False,
                                   use_image_name=True, mode='val')
         keys = losses.keys()
