@@ -8,6 +8,7 @@ from collections import OrderedDict
 from monai.metrics import compute_meandice
 
 from .base_model import BaseModel
+from .multitask_parent import Multitask
 from . import networks3d
 from torch.utils.tensorboard import SummaryWriter
 from monai.visualize import img2tensorboard
@@ -20,7 +21,7 @@ from voxelmorph import voxelmorph as vxm
 from . import networks
 
 
-class DefRegModel(BaseModel):
+class DefRegModel(BaseModel, Multitask):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -162,7 +163,7 @@ class DefRegModel(BaseModel):
 
         if self.mask_B is not None:
             self.mask_fixed = self.mask_B[0:1, ...]
-            self.mask_moving = self.mask_B[1:0, ...]
+            self.mask_moving = self.mask_B[1:2, ...]
         def_reg_output = self.netDefReg(self.moving, self.fixed, registration=not self.isTrain)
 
         if self.opt.bidir and self.isTrain:
@@ -196,7 +197,7 @@ class DefRegModel(BaseModel):
             one_hot_deformed = torch.zeros(shape, device=self.mask_B.device)
             one_hot_moving = torch.zeros(shape, device=self.mask_B.device)
             for i in range(n):
-                one_hot_fixed[:, i, self.mask_fixed[1, 0, ...] == i] = 1
+                one_hot_fixed[:, i, self.mask_fixed[0, 0, ...] == i] = 1
                 one_hot_deformed[:, i, self.mask_def[0, 0, ...] == i] = 1
                 one_hot_moving[:, i, self.mask_moving[0, 0, ...] == i] = 1
 
@@ -249,6 +250,15 @@ class DefRegModel(BaseModel):
         if losses is not None:
             for key in losses:
                 writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+
+        if self.diff_dice is not None:
+            writer.add_scalar(mode + 'DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
+        if self.loss_warped_dice is not None:
+            writer.add_scalar(mode + 'DICE/deformed', scalar_value=self.loss_warped_dice,
+                              global_step=global_step)
+            writer.add_scalar(mode + 'DICE/moving', scalar_value=self.loss_moving_dice,
+                              global_step=global_step)
+
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""

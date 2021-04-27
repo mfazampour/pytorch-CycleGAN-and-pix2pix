@@ -44,3 +44,5 @@ test/data/legacy_serialized.pt
 .polyaxon
 
 .polyaxon_old/
+
+repo.tar.gz

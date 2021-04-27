@@ -74,6 +74,7 @@ run:
     --bidir \\
     --inshape 80 80 80 \\
     --similarity NCC \\
-    --evalutate_freq 10 \\
+    --evalutate_freq 100 \\
     --load_init_models {{ load_init_models }} \\
-    --epoch {{ epoch }}
+    --epoch {{ epoch }} \\
+    --continue_train
