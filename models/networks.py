@@ -1842,6 +1842,14 @@ class GradLoss(nn.Module):
         return grad
 
 
+class MSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse_loss = nn.MSELoss()
+
+    def forward(self, y_true: torch.Tensor, y_pred: torch.Tensor, mask: torch.Tensor = None):
+        return self.mse_loss(y_true, y_pred) * mask if mask is not None else self.mse_loss(y_true, y_pred)
+
 ##########################################################################
 ## NCC loss nn module using voxelmorph NCC
 ##
@@ -1852,8 +1860,8 @@ class NCCLoss(nn.Module):
         super().__init__()
         self.ncc_loss = vxm.losses.LCC(s=4, device='cuda')
 
-    def forward(self, y_true, y_pred):
-        return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred)
+    def forward(self, y_true, y_pred, mask):
+        return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred, mask=mask)
 
 
 ##########################################################################
@@ -1867,6 +1875,6 @@ class MINDLoss(nn.Module):
         self.win = win
         self.loss_fn = vxm.losses.MIND()
 
-    def forward(self, y_true, y_pred):
+    def forward(self, y_true, y_pred, mask):
         return self.loss_fn.loss(y_true=y_true, y_pred=y_pred)
 
