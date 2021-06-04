@@ -255,7 +255,7 @@ class Multitask:
 
 
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
-            self.loss_moving_dice = compute_meandice(one_hot_deformed, one_hot_moving, include_background=False)
+            self.loss_moving_dice = compute_meandice(one_hot_moving, one_hot_fixed, include_background=False)
             loss_beginning_dice = compute_meandice( one_hot_moving, one_hot_fixed,include_background=False)
             self.diff_dice = loss_beginning_dice - self.loss_warped_dice
 
