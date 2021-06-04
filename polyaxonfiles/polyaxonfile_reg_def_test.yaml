@@ -36,7 +36,6 @@ params:
   dataroot: /Prostate_Reg_KM/Anonymized_cleaned/
   display_freq: 50
   display_id: -1
-  epoch: latest
   epoch_count: 0
   epochs_before_reg: 0
   input_nc: 1
@@ -52,6 +51,7 @@ params:
   print_freq: 20
   load_init_models: /data/Prostate_Reg_KM/multitask/def_reg_test/
   epoch: latest
+  denoising: median
 
 run:
   cmd: GEOMSTATS_BACKEND=pytorch python train.py \\
@@ -64,6 +64,7 @@ run:
     --print_freq {{ print_freq }}
     --lr_decay_iters {{ lr_decay_iters }} \\
     --epoch_count={{ epoch_count }} \\
+
     --n_epochs={{ n_epochs }} \\
     --n_epochs_decay {{ n_epochs_decay }} \\
     --model={{ model }} \\
@@ -77,4 +78,6 @@ run:
     --evalutate_freq 100 \\
     --load_init_models {{ load_init_models }} \\
     --epoch {{ epoch }} \\
-    --continue_train
+    --denoising {{ denoising}}
+#    \\
+#    --continue_train

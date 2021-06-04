@@ -1,4 +1,5 @@
 import os.path
+
 os.environ["TORCHIO_HIDE_CITATION_PROMPT"] = str(1)
 
 import random
@@ -10,6 +11,11 @@ from util import create_landmarks
 import pickle
 import numpy as np
 import SimpleITK as sitk
+import scipy
+from scipy.ndimage import median_filter
+from scipy.ndimage.filters import uniform_filter
+from scipy.ndimage.measurements import variance
+
 import torchio
 from torchio.transforms import (
     RescaleIntensity,
@@ -25,6 +31,7 @@ from torchio.transforms import (
     ZNormalization,
     Lambda
 )
+
 try:
     import napari
 except:
@@ -61,6 +68,9 @@ class VolumeDataset(BaseDataset):
         parser.add_argument('--min_size', type=int, default=80, help='minimum length of the axes')
         parser.add_argument('--transforms', nargs='+', default=[],
                             help='list of possible augmentations, currently [flip, affine]')
+        parser.add_argument('--denoising', nargs='+', default=[],
+                            help='list of possible denoising, currently [median, lee_filter]')
+        parser.add_argument('--denoising_size', type=int, default=4, help='size of the denoising filter kernel')
         return parser
 
     def __init__(self, opt, mode=None):
@@ -100,6 +110,32 @@ class VolumeDataset(BaseDataset):
         x[x > h] = h
         return x
 
+    @staticmethod
+    def median_filter_creator(size: int):
+        def median_image(x: torch.Tensor):
+            im = median_filter(x.squeeze().cpu().numpy(), size=size)
+            im = torch.tensor(im, device=x.device, dtype=x.dtype)
+            im = torch.reshape(im, x.shape)
+            return im
+        return median_image
+
+    @staticmethod
+    def lee_filter_creator(size: int):
+        def lee_filter(x: torch.Tensor):
+            img = x.squeeze().cpu().numpy()
+            img_mean = uniform_filter(img, [size]*len(img.shape))
+            img_sqr_mean = uniform_filter(img ** 2, [size] * len(img.shape))
+            img_variance = img_sqr_mean - img_mean ** 2
+
+            overall_variance = variance(img)
+
+            img_weights = img_variance / (img_variance + overall_variance)
+            img_output = img_mean + img_weights * (img - img_mean)
+            img = torch.tensor(img_output, device=x.device, dtype=x.dtype)
+            img = torch.reshape(img, x.shape)
+            return img
+        return lee_filter
+
     def create_transforms(self):
         transforms = []
 
@@ -121,6 +157,15 @@ class VolumeDataset(BaseDataset):
             if 'flip' in self.opt.transforms:
                 transforms.append(RandomFlip(axes=(0, 2), p=0.8))
 
+        self.denoising_transform = None
+        if len(self.opt.denoising) > 0:
+            if 'median' in self.opt.denoising:
+                self.denoising_transform = Lambda(VolumeDataset.median_filter_creator(self.opt.denoising_size),
+                                                  types_to_apply=[torchio.INTENSITY])
+            if 'lee_filter' in self.opt.denoising:
+                self.denoising_transform = Lambda(VolumeDataset.lee_filter_creator(self.opt.denoising_size),
+                                                  types_to_apply=[torchio.INTENSITY])
+
         # # As RandomAffine is faster then RandomElasticDeformation, we choose to
         # # apply RandomAffine 80% of the times and RandomElasticDeformation the rest
         # # Also, there is a 25% chance that none of them will be applied
@@ -131,8 +176,8 @@ class VolumeDataset(BaseDataset):
         #     )
         #     transforms += [RandomFlip(axes=(0, 2), p=0.8), spatial]
 
-       # self.ratio = self.min_size / np.max(self.input_size)
-        #transforms.append(Resample(self.ratio))
+        # self.ratio = self.min_size / np.max(self.input_size)
+        # transforms.append(Resample(self.ratio))
         transforms.append(CropOrPad(self.input_size))
         transform = Compose(transforms)
         return transform
@@ -174,9 +219,11 @@ class VolumeDataset(BaseDataset):
             'B_landmark': landmarks_b,
         }
         if self.load_mask:
-            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
+            dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1],
+                              :self.input_size[2]].type(torch.uint8)
             if 'trus_tree' in transformed_.keys():
-                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1], :self.input_size[2]].type(torch.uint8)
+                dict_['B_mask'] = transformed_['trus_tree'].data[:, :self.input_size[0], :self.input_size[1],
+                                  :self.input_size[2]].type(torch.uint8)
                 dict_['B_mask_available'] = True
             else:
                 dict_['B_mask'] = torch.zeros_like(dict_['A_mask'])
@@ -202,6 +249,8 @@ class VolumeDataset(BaseDataset):
             else:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
                                           trus=torchio.Image(sample + "/trus_cut.mhd"))
+            if self.denoising_transform is not None:
+                subject['trus'] = self.denoising_transform(subject['trus'])
             self.subjects[sample] = subject
         subject = self.subjects[sample]
         return sample, subject
