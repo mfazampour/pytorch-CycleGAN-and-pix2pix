@@ -266,7 +266,8 @@ class DefRegModel(BaseModel, Multitask):
         pass
 
     def add_deformable_figures(self, mode, global_step, writer, use_image_name=False):
-        n = 9 if self.mask_B is None else 11
+        n = 8 if self.mask_B is None else 10
+        n = n+1 if self.opt.use_mask else n
         axs, fig = vxm.torch.utils.init_figure(3, n)
         vxm.torch.utils.set_axs_attribute(axs)
         vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
@@ -288,17 +289,21 @@ class DefRegModel(BaseModel, Multitask):
         overlay[:, 0:1, ...] += self.fixed.detach() * 0.6
         overlay[overlay > 1] = 1
         vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Deformed overlay', cmap=None)
-        vxm.torch.utils.fill_subplots(self.fov_mask.int().detach().cpu(), axs=axs[8, :], img_name='FoV mask')
+        idx = 8
+        if self.opt.use_mask:
+            vxm.torch.utils.fill_subplots(self.fov_mask.int().detach().cpu(), axs=axs[idx, :], img_name='FoV mask')
+            idx += 1
         if self.mask_B is not None:
             overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_moving.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[9, :], img_name='mask moving on fixed', cmap=None)
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask moving on fixed', cmap=None)
+            idx += 1
 
             overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_def.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[10, :], img_name='mask warped on fixed', cmap=None)
+            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask warped on fixed', cmap=None)
         #
         if use_image_name:
             tag = mode + f'{self.patient}/Deformable'
