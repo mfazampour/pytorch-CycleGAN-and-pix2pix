@@ -37,21 +37,20 @@ params:
   display_freq: 50
   display_id: -1
   epoch_count: 0
-  epochs_before_reg: 0
   input_nc: 1
   load_mask: true
   lr: 0.0002
   lr_decay_iters: 1
   lr_policy: linear
   model: def_reg
-  n_epochs: 50
+  n_epochs: 100
   n_epochs_decay: 25
   name: DefReg
   output_nc: 1
   print_freq: 20
   load_init_models: /data/Prostate_Reg_KM/multitask/def_reg_test/
   epoch: latest
-  denoising: median
+  denoising: lee_filter
 
 run:
   cmd: GEOMSTATS_BACKEND=pytorch python train.py \\
@@ -64,12 +63,10 @@ run:
     --print_freq {{ print_freq }}
     --lr_decay_iters {{ lr_decay_iters }} \\
     --epoch_count={{ epoch_count }} \\
-
     --n_epochs={{ n_epochs }} \\
     --n_epochs_decay {{ n_epochs_decay }} \\
     --model={{ model }} \\
     --load_mask={{ load_mask }} \\
-    --epochs_before_reg={{ epochs_before_reg }} \\
     --epoch={{ epoch }} \\
     --display_id={{ display_id }} \\
     --bidir \\

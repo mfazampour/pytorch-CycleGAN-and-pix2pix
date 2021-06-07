@@ -59,16 +59,11 @@ class DefRegModel(BaseModel, Multitask):
 
         parser.add_argument('--show_volumes', type=bool, default=False, help='visualize transformed volumes w napari')
         parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
+        parser.add_argument('--use_mask', action='store_true', help='use mask for registration')
 
         if is_train:
-            parser.add_argument('--vxm_iteration_steps', type=int, default=5,
-                                help='number of steps to train the registration network for each simulated US')
             parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'],
                                 help='type of the similarity used for training voxelmorph')
-            parser.add_argument('--epochs_before_reg', type=int, default=0,
-                                help='number of epochs to train the network before reg loss is used')
-            parser.add_argument('--image-loss', default='lcc',
-                                help='image reconstruction loss - can be mse or ncc (default: mse)')
 
         return parser
 
@@ -163,7 +158,10 @@ class DefRegModel(BaseModel, Multitask):
 
         fov_mask_moving = self.moving > self.moving.min()
         fov_mask_fixed = self.fixed > self.fixed.min()
-        self.fov_mask = fov_mask_moving * fov_mask_fixed
+        if self.opt.use_mask:
+            self.fov_mask = fov_mask_moving * fov_mask_fixed
+        else:
+            self.fov_mask = torch.ones_like(fov_mask_moving)
 
         if self.mask_B is not None:
             self.mask_fixed = self.mask_B[0:1, ...]
