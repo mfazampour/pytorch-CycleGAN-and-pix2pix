@@ -19,8 +19,6 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 
-
-
 class Pix2PixHDModel(BaseModel):
 
     @staticmethod
@@ -162,7 +160,8 @@ class Pix2PixHDModel(BaseModel):
         # Names so we can breakout loss
         # self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
 
-        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake', 'D_fake_dn', 'D_real_dn', 'G_GAN_dn']
+        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake',
+                           'D_fake_dn', 'D_real_dn', 'G_GAN_dn', 'G_GAN_Feat_dn']
         self.visual_names = []
         self.loss_functions = ['backward_G', 'compute_D_loss']
 
@@ -227,9 +226,11 @@ class Pix2PixHDModel(BaseModel):
         self.loss_G_GAN += loss_D_fake_dn
 
         pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
+        pred_real_dn = self.discriminate(self.input_cat_dn, self.real_B_dn, netD=self.netD_DN)
 
         # GAN feature matching loss
         self.loss_G_GAN_Feat = 0
+        self.loss_G_GAN_Feat_dn = 0
         if not self.opt.no_ganFeat_loss:
             feat_weights = 4.0 / (self.opt.n_layers_D + 1)
             D_weights = 1.0 / self.opt.num_D
@@ -238,10 +239,18 @@ class Pix2PixHDModel(BaseModel):
                     self.loss_G_GAN_Feat += D_weights * feat_weights * \
                                             self.criterionFeat(pred_fake[i][j],
                                                                pred_real[i][j].detach()) * self.opt.lambda_feat
+            # Denoised image
+            feat_weights = 4.0 / self.opt.n_layers_D
+            D_weights = 1.0 / self.opt.num_D
+            for i in range(self.opt.num_D):
+                for j in range(len(pred_fake_dn[i]) - 1):
+                    self.loss_G_GAN_Feat_dn += D_weights * feat_weights * \
+                                            self.criterionFeat(pred_fake_dn[i][j],
+                                                               pred_real_dn[i][j].detach()) * self.opt.lambda_feat
 
         self.loss_pix2pix = self.loss_G_GAN
         if not self.opt.no_ganFeat_loss:
-            self.loss_pix2pix += self.loss_G_GAN_Feat
+            self.loss_pix2pix += self.loss_G_GAN_Feat + self.loss_G_GAN_Feat_dn
 
         ########   END pix2pix HD    ########
 
