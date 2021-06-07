@@ -105,8 +105,8 @@ class Pix2PixHDModel(BaseModel):
             # pix2pixHD optimizers
             # optimizer G
             params = list(self.netG.parameters())
-            if self.gen_features:
-                params += list(self.netE.parameters())
+            # if self.gen_features:
+            #     params += list(self.netE.parameters())
             self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
 
             # optimizer D
@@ -135,9 +135,9 @@ class Pix2PixHDModel(BaseModel):
         # specify the models you want to save to the disk. The training/test scripts will call
         # <BaseModel.save_networks> and <BaseModel.load_networks>
         if self.isTrain:
-            self.model_names = ['G', 'E', 'D', 'D_DN']
+            self.model_names = ['G', 'D', 'D_DN']
         else:  # during test time, only load G
-            self.model_names = ['G', 'E']
+            self.model_names = ['G']
 
         # pix2pixHD
 
@@ -151,8 +151,8 @@ class Pix2PixHDModel(BaseModel):
                                            opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
         self.netD_DN = networks3d.define_D_HD(self.netD_input_nc, opt.ndf, opt.n_layers_D - 1, opt.norm, self.use_sigmoid,
                                               opt.num_D, not opt.no_ganFeat_loss, gpu_ids=self.gpu_ids)
-        self.netE = networks3d.define_G(input_nc=opt.output_nc, output_nc=opt.feat_num, ngf=opt.nef, netG='encoder',
-                                        n_downsample_global=opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)
+        # self.netE = networks3d.define_G(input_nc=opt.output_nc, output_nc=opt.feat_num, ngf=opt.nef, netG='encoder',
+        #                                 n_downsample_global=opt.n_downsample_E, norm=opt.norm, gpu_ids=self.gpu_ids)
         self.denoiser = networks3d.ImageDenoise()
 
     def set_visdom_names(self):
@@ -161,7 +161,7 @@ class Pix2PixHDModel(BaseModel):
         # Names so we can breakout loss
         # self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
 
-        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake']
+        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake', 'D_fake_dn']
         self.visual_names = []
 
     def clean_tensors(self):
@@ -192,7 +192,7 @@ class Pix2PixHDModel(BaseModel):
         self.loss_G_GAN_Feat = torch.tensor([0.0])
         self.loss_D_real = torch.tensor([0.0])
         self.loss_D_fake = torch.tensor([0.0])
-
+        self.loss_D_fake_dn = torch.tensor([0.0])
         self.netG_input_nc = torch.tensor([0.0])
 
     def discriminate(self, input_label, test_image, netD: torch.nn.Module, use_pool=False):
@@ -218,8 +218,10 @@ class Pix2PixHDModel(BaseModel):
         pred_fake = self.netD.forward(torch.cat((self.input_cat, self.fake_B), dim=1))
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
-        pred_fake_dn = self.netD.forward(torch.cat((self.input_cat_dn, self.fake_B_dn), dim=1))
-        self.loss_G_GAN += self.criterionGAN(pred_fake_dn, True)
+        pred_fake_dn = self.netD_DN.forward(torch.cat((self.input_cat_dn, self.fake_B_dn), dim=1))
+        loss_D_fake_dn = self.criterionGAN(pred_fake_dn, True)
+        self.loss_D_fake_dn = loss_D_fake_dn.detach()
+        self.loss_G_GAN += loss_D_fake_dn
 
         pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
 
@@ -268,6 +270,24 @@ class Pix2PixHDModel(BaseModel):
         self.backward_D()
         self.optimizer_D.step()
 
+    def compute_D_loss(self):
+        """Calculate GAN loss for the discriminator"""
+        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, netD=self.netD, use_pool=True)
+        self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
+
+        pred_fake_pool_dn = self.discriminate(self.input_cat_dn, self.fake_B_dn, netD=self.netD_DN, use_pool=True)
+        self.loss_D_fake += self.criterionGAN(pred_fake_pool_dn, False)
+
+        # Real Detection and Loss
+        pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
+        self.loss_D_real = self.criterionGAN(pred_real, True)
+
+        pred_real = self.discriminate(self.input_cat_dn, self.real_B_dn, netD=self.netD_DN)
+        self.loss_D_real += self.criterionGAN(pred_real, True)
+
+        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+        return self.loss_D
+
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
 
@@ -303,24 +323,6 @@ class Pix2PixHDModel(BaseModel):
         if losses is not None:
             for key in losses:
                 writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
-
-    def compute_D_loss(self):
-        """Calculate GAN loss for the discriminator"""
-        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, netD=self.netD, use_pool=True)
-        self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
-
-        pred_fake_pool_dn = self.discriminate(self.input_cat_dn, self.fake_B_dn, netD=self.netD_DN, use_pool=True)
-        self.loss_D_fake += self.criterionGAN(pred_fake_pool_dn, False)
-
-        # Real Detection and Loss
-        pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
-        self.loss_D_real = self.criterionGAN(pred_real, True)
-
-        pred_real = self.discriminate(self.input_cat_dn, self.real_B_dn, netD=self.netD_DN)
-        self.loss_D_real += self.criterionGAN(pred_real, True)
-
-        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
-        return self.loss_D
 
     def compute_visuals(self):
         """Calculate additional output images for visdom and HTML visualization"""

@@ -33,18 +33,14 @@ params:
   batch_size: 1
   epoch_count: 0
   n_epochs: 100
-  netG: "global"
-  CUT_mode: "CUT"
   model: "pix2pixHD"
   name: "pix2pixHD"
   load_mask: True
   display_id: -1
   epoch: init
-  n_blocks_global: 9
-  n_blocks_local: 3
-  ngf: 32
-
- 
+  n_blocks_global: 4
+  n_blocks_local: 4
+  ngf: 64
 
 
 
@@ -61,7 +57,6 @@ run:
                                     --lr_decay_iters {{ lr_decay_iters }} \
                                     --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
-                                    --netG={{ netG }} \ 
                                     --model={{ model }} \
                                     --load_mask={{ load_mask }} \
                                     --n_blocks_global={{ n_blocks_global }} \
@@ -69,8 +64,7 @@ run:
                                     --ngf={{ ngf }} \
                                     --dataset_mode={{dataset_mode}}\
                                     --epoch={{ epoch }} \
-                                    --display_id={{ display_id }} \
-                                    --no_instance
+                                    --display_id={{ display_id }}
 
 tags:
   - pix2pixHD
