@@ -8,6 +8,7 @@ from util import affine_transform
 from models.base_model import BaseModel
 from torch.autograd import Variable
 from monai.visualize import img2tensorboard
+import matplotlib.pyplot as plt
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -161,8 +162,9 @@ class Pix2PixHDModel(BaseModel):
         # Names so we can breakout loss
         # self.losses_pix2pix = ['G_GAN', 'G_GAN_Feat', 'D_real', 'D_fake']
 
-        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake', 'D_fake_dn']
+        self.loss_names = ['G', 'G_GAN_Feat', 'G_GAN', 'D_real', 'D_fake', 'D_fake_dn', 'D_real_dn', 'G_GAN_dn']
         self.visual_names = []
+        self.loss_functions = ['backward_G', 'compute_D_loss']
 
     def clean_tensors(self):
         all_members = self.__dict__.keys()
@@ -193,6 +195,7 @@ class Pix2PixHDModel(BaseModel):
         self.loss_D_real = torch.tensor([0.0])
         self.loss_D_fake = torch.tensor([0.0])
         self.loss_D_fake_dn = torch.tensor([0.0])
+        self.loss_D_real_dn = torch.tensor([0.0])
         self.netG_input_nc = torch.tensor([0.0])
 
     def discriminate(self, input_label, test_image, netD: torch.nn.Module, use_pool=False):
@@ -220,7 +223,7 @@ class Pix2PixHDModel(BaseModel):
 
         pred_fake_dn = self.netD_DN.forward(torch.cat((self.input_cat_dn, self.fake_B_dn), dim=1))
         loss_D_fake_dn = self.criterionGAN(pred_fake_dn, True)
-        self.loss_D_fake_dn = loss_D_fake_dn.detach()
+        self.loss_G_GAN_dn = loss_D_fake_dn.detach()
         self.loss_G_GAN += loss_D_fake_dn
 
         pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
@@ -276,14 +279,18 @@ class Pix2PixHDModel(BaseModel):
         self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
 
         pred_fake_pool_dn = self.discriminate(self.input_cat_dn, self.fake_B_dn, netD=self.netD_DN, use_pool=True)
-        self.loss_D_fake += self.criterionGAN(pred_fake_pool_dn, False)
+        loss_D_fake_dn = self.criterionGAN(pred_fake_pool_dn, False)
+        self.loss_D_fake_dn = loss_D_fake_dn.detach()
+        self.loss_D_fake += loss_D_fake_dn
 
         # Real Detection and Loss
         pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
         self.loss_D_real = self.criterionGAN(pred_real, True)
 
-        pred_real = self.discriminate(self.input_cat_dn, self.real_B_dn, netD=self.netD_DN)
-        self.loss_D_real += self.criterionGAN(pred_real, True)
+        pred_real_dn = self.discriminate(self.input_cat_dn, self.real_B_dn, netD=self.netD_DN)
+        loss_D_real_dn = self.criterionGAN(pred_real_dn, True)
+        self.loss_D_real_dn = loss_D_real_dn.detach()
+        self.loss_D_real += loss_D_real_dn
 
         self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
         return self.loss_D
@@ -318,7 +325,9 @@ class Pix2PixHDModel(BaseModel):
             tag = mode + f'{self.patient}/GAN'
         else:
             tag = mode + 'GAN'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
         if losses is not None:
             for key in losses:
