@@ -1860,7 +1860,7 @@ class NCCLoss(nn.Module):
         super().__init__()
         self.ncc_loss = vxm.losses.LCC(s=4, device='cuda')
 
-    def forward(self, y_true, y_pred, mask):
+    def forward(self, y_true, y_pred, mask=None):
         return self.ncc_loss.loss(y_true=y_true, y_pred=y_pred, mask=mask)
 
 
@@ -1875,6 +1875,6 @@ class MINDLoss(nn.Module):
         self.win = win
         self.loss_fn = vxm.losses.MIND()
 
-    def forward(self, y_true, y_pred, mask):
+    def forward(self, y_true, y_pred, mask=None):
         return self.loss_fn.loss(y_true=y_true, y_pred=y_pred)
 
