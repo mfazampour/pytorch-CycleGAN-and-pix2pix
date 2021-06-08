@@ -5,7 +5,8 @@ build:
     - "apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git"
     - "pip install -r requirements.txt"
   image: "pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime"
-environment: 
+
+environment:
   node_selector: 
     nvidiaDriver: "450"
   resources: 
@@ -18,9 +19,11 @@ environment:
     memory: 
       limits: 32000
       requests: 20000
+
 framework: pytorch
 kind: experiment
-params: 
+
+params:
   dataroot: '/Prostate_Reg_KM/Anonymized_cleaned/'
   dataset_mode: "volume"
   output_nc: 1
@@ -33,15 +36,15 @@ params:
   batch_size: 1
   epoch_count: 0
   n_epochs: 100
-  model: "pix2pixHD"
-  name: "pix2pixHD"
+  model: "cutHD3d"
+  name: "cutHD3d"
   load_mask: True
   display_id: -1
   epoch: init
   n_blocks_global: 4
   n_blocks_local: 4
   ngf: 64
-
+  CUT_mode: CUT
 
 
 run:
@@ -64,8 +67,12 @@ run:
                                     --ngf={{ ngf }} \
                                     --dataset_mode={{dataset_mode}}\
                                     --epoch={{ epoch }} \
-                                    --display_id={{ display_id }}
+                                    --display_id={{ display_id }} \
+                                    --CUT_mode {{ CUT_mode }} \
+                                    --evalutate_freq 20
+                                    --load_mask true
+
 
 tags:
-  - pix2pixHD
+  - CUT_HD
 version: 1

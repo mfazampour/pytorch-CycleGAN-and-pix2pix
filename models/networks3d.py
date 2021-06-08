@@ -308,7 +308,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
 ##############################################################################
 
 class MultiscaleDiscriminator(nn.Module):
-    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d,
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm3d,
                  use_sigmoid=False, num_D=3, getIntermFeat=False):
         super(MultiscaleDiscriminator, self).__init__()
         self.num_D = num_D
@@ -443,18 +443,15 @@ class Encoder(nn.Module):
 
 
 class LocalEnhancer(nn.Module):
-    def __init__(self, input_nc, output_nc, ngf=32, n_downsample_global=3, n_blocks_global=9,
+    def __init__(self, input_nc, output_nc, ngf=32, n_downsample_global=2, n_blocks_global=4,
                  n_local_enhancers=1, n_blocks_local=3, norm_layer=nn.BatchNorm3d, padding_type='reflect'):
         super(LocalEnhancer, self).__init__()
         self.n_local_enhancers = n_local_enhancers
 
         ###### global generator model #####
         ngf_global = ngf * (2 ** n_local_enhancers)
-        model_global = GlobalGenerator(input_nc, output_nc, ngf_global, n_downsample_global, n_blocks_global,
-                                       norm_layer).model
-        model_global = [model_global[i] for i in
-                        range(len(model_global) - 3)]  # get rid of final convolution layers
-        self.model = nn.Sequential(*model_global)
+        self.model_global = GlobalGenerator(input_nc, output_nc, ngf_global, n_downsample_global,
+                                            n_blocks_global, norm_layer)
 
         ###### local enhancer layers #####
         for n in range(1, n_local_enhancers + 1):
@@ -467,7 +464,7 @@ class LocalEnhancer(nn.Module):
             ### residual blocks
             model_upsample = []
             for i in range(n_blocks_local):
-                model_upsample += [ResnetBlock3d(ngf=ngf_global * 2, padding_type=padding_type, norm_layer=norm_layer)]
+                model_upsample += [ResnetBlock3d(dim=ngf_global * 2, padding_type=padding_type, norm_layer=norm_layer)]
 
             ### upsample
             model_upsample += [
@@ -482,24 +479,32 @@ class LocalEnhancer(nn.Module):
             setattr(self, 'model' + str(n) + '_1', nn.Sequential(*model_downsample))
             setattr(self, 'model' + str(n) + '_2', nn.Sequential(*model_upsample))
 
-        self.downsample = nn.AvgPool3d(3, stride=2, padding=1, count_include_pad=False)
+        self.downsample = ImageDenoise()
 
-    def forward(self, input):
+    def forward(self, input, encode_only=False):
         ### create input pyramid
         input_downsampled = [input]
         for i in range(self.n_local_enhancers):
             input_downsampled.append(self.downsample(input_downsampled[-1]))
 
+        feats = []
         ### output at coarest level
-        output_prev = self.model(input_downsampled[-1])
+        coarse_out, output_prev = self.model_global(input_downsampled[-1])
+        if encode_only:
+            feats.append(output_prev)
         ### build up one layer at a time
         for n_local_enhancers in range(1, self.n_local_enhancers + 1):
             model_downsample = getattr(self, 'model' + str(n_local_enhancers) + '_1')
             model_upsample = getattr(self, 'model' + str(n_local_enhancers) + '_2')
             input_i = input_downsampled[self.n_local_enhancers - n_local_enhancers]
-            output_prev = model_upsample(model_downsample(input_i) + output_prev)
-        return output_prev
-
+            if encode_only:
+                feats.append(model_downsample(input_i))
+            elif not encode_only or (encode_only and n_local_enhancers != self.n_local_enhancers):
+                output_prev = model_upsample(model_downsample(input_i) + output_prev)
+        if encode_only:
+            return feats
+        else:
+            return output_prev, coarse_out
 
 
 class Normalize(nn.Module):
@@ -767,7 +772,7 @@ class ResnetGenerator3d(nn.Module):
             return fake
 
 class GlobalGenerator(nn.Module):
-    def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm3d,
+    def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=2, n_blocks=9, norm_layer=nn.BatchNorm3d,
                  padding_type='reflect'):
         assert (n_blocks >= 0)
         super(GlobalGenerator, self).__init__()
@@ -791,11 +796,15 @@ class GlobalGenerator(nn.Module):
             model += [nn.ConvTranspose3d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=2, padding=1,
                                          output_padding=1),
                       norm_layer(int(ngf * mult / 2)), activation]
+        self.encoder = nn.Sequential(*model)
+        model = []
         model += [nn.ReplicationPad3d(3), nn.Conv3d(ngf, output_nc, kernel_size=7, padding=0), nn.Tanh()]
-        self.model = nn.Sequential(*model)
+        self.decoder = nn.Sequential(*model)
 
     def forward(self, input):
-        return self.model(input)
+        feat = self.encoder(input)
+        out = self.decoder(feat)
+        return out, feat
 
 
 
@@ -2215,3 +2224,13 @@ class DiceLoss(_AbstractDiceLoss):
 
     def dice(self, input, target, weight):
         return compute_per_channel_dice(input, target, weight=self.weight)
+
+
+
+class ImageDenoise(nn.Module):
+    def __init__(self):
+        super(ImageDenoise, self).__init__()
+        self.model = nn.AvgPool3d(3, stride=2, padding=1, count_include_pad=False)
+
+    def forward(self, input):
+        return self.model(input)

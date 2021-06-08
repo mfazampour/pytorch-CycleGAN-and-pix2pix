@@ -89,18 +89,15 @@ class Pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
         """Calculate GAN and L1 loss for the generator"""
         self.loss_G = 0.0
         ########   pix2pix HD    ########
-        # Fake Detection and Loss
-
-        pred_fake_pool = self.discriminate(self.input_cat, self.fake_B, use_pool=True)
-        self.loss_D_fake = self.criterionGAN(pred_fake_pool, False)
-
-        # Real Detection and Loss
-        pred_real = self.discriminate(self.input_cat, self.real_B)
-        self.loss_D_real = self.criterionGAN(pred_real, True)
 
         # GAN loss (Fake Passability Loss)
         pred_fake = self.netD.forward(torch.cat((self.input_cat, self.fake_B), dim=1))
         self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+
+        pred_fake = self.netD.forward(torch.cat((self.input_cat, self.fake_B_dn), dim=1))
+        self.loss_G_GAN += self.criterionGAN(pred_fake, True)
+
+        pred_real = self.discriminate(self.input_cat, self.real_B, netD=self.netD)
 
         # GAN feature matching loss
         self.loss_G_GAN_Feat = 0
@@ -112,11 +109,13 @@ class Pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
                     self.loss_G_GAN_Feat += D_weights * feat_weights * \
                                             self.criterionFeat(pred_fake[i][j],
                                                                pred_real[i][j].detach()) * self.opt.lambda_feat
-        losses = self.loss_filter(self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_D_real, self.loss_D_fake)
-        self.losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
-        self.loss_dict = dict(zip(self.losses_pix2pix, self.losses))
+        # losses = self.loss_filter(self.loss_G_GAN, self.loss_G_GAN_Feat, self.loss_D_real, self.loss_D_fake)
+        # self.losses = [torch.mean(x) if not isinstance(x, int) else x for x in losses]
+        # self.loss_dict = dict(zip(self.losses_pix2pix, self.losses))
 
-        self.loss_pix2pix = self.loss_dict['G_GAN'] + self.loss_dict.get('G_GAN_Feat', 0)
+        self.loss_pix2pix = self.loss_G_GAN
+        if not self.opt.no_ganFeat_loss:
+            self.loss_pix2pix += self.loss_G_GAN_Feat
 
         self.loss_G = self.loss_pix2pix * self.first_phase_coeff
         ########   END pix2pix HD    ########

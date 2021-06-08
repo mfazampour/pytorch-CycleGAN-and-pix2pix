@@ -75,34 +75,8 @@ class BaseOptions():
         parser.add_argument('--aspect_ratio', type=float, default=1.0, help='aspect ratio of result images')
         parser.add_argument('--which_epoch', type=str, default='latest', help='which epoch to load? set to latest to use latest cached model')
         parser.add_argument('--how_many', type=int, default=50, help='how many test images to run')
-        parser.add_argument('--cluster_path', type=str, default='features_clustered_010.npy', help='the path for clustered results of encoded features')
         parser.add_argument('--use_encoded_image', action='store_true', help='if specified, encode the real image to get the feature map')
-        parser.add_argument("--export_onnx", type=str, help="export ONNX model to a given file")
-        parser.add_argument("--engine", type=str, help="run serialized TRT engine")
-        parser.add_argument("--onnx", type=str, help="run ONNX model via TRT")
-        parser.add_argument('--label_nc', type=int, default=35, help='# of input label channels')
-        parser.add_argument('--no_instance', action='store_true', help='if specified, do *not* add instance map as input')
-            # for instance-wise features
-        parser.add_argument('--instance_feat', action='store_true',
-                                 help='if specified, add encoded instance features as input')
-        parser.add_argument('--label_feat', action='store_true',
-                                 help='if specified, add encoded label features as input')
-        parser.add_argument('--feat_num', type=int, default=3, help='vector length for encoded features')
-        parser.add_argument('--load_features', action='store_true',
-                                 help='if specified, load precomputed feature maps')
-        parser.add_argument('--n_downsample_E', type=int, default=4, help='# of downsampling layers in encoder')
-        parser.add_argument('--nef', type=int, default=16, help='# of encoder filters in the first conv layer')
-        parser.add_argument('--n_clusters', type=int, default=10, help='number of clusters for features')
-            # for generator
-        parser.add_argument('--n_downsample_global', type=int, default=4,
-                                 help='number of downsampling layers in netG')
-        parser.add_argument('--n_blocks_global', type=int, default=9,
-                                 help='number of residual blocks in the global generator network')
-        parser.add_argument('--n_blocks_local', type=int, default=3,
-                                 help='number of residual blocks in the local enhancer network')
-        parser.add_argument('--n_local_enhancers', type=int, default=1, help='number of local enhancers to use')
-        parser.add_argument('--niter_fix_global', type=int, default=0,
-                                 help='number of epochs that we only train the outmost local enhancer')
+        parser.add_argument('--label_nc', type=int, default=1, help='# of input label channels')
 
 
         # parameters related to StyleGAN2-based networks

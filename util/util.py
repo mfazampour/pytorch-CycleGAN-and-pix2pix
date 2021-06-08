@@ -164,3 +164,11 @@ def correct_resize(t, size, mode=Image.BICUBIC):
         resized_t = torchvision.transforms.functional.to_tensor(one_image) * 2 - 1.0
         resized.append(resized_t)
     return torch.stack(resized, dim=0).to(device)
+
+
+def create_overlaid_tensor(img1: torch.Tensor, img2: torch.Tensor, alpha=0.5):
+    overlay = img1.repeat(1, 3, 1, 1, 1)
+    overlay[:, 0:1, ...] += alpha * img2
+    overlay *= 0.8
+    overlay[overlay > 1] = 1
+    return overlay
