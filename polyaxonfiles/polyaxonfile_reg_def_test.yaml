@@ -74,7 +74,8 @@ run:
     --similarity NCC \\
     --evalutate_freq 100 \\
     --load_init_models {{ load_init_models }} \\
-    --epoch {{ epoch }} \\
-    --denoising {{ denoising}}
+    --epoch {{ epoch }}
+#    \\
+#    --denoising {{ denoising}}
 #    \\
 #    --continue_train

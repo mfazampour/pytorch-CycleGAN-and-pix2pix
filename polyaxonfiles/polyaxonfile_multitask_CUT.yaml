@@ -1,13 +1,20 @@
---- 
+---
+tags:
+  - Mutltitask
+  - HPTuning
+
+version: 1
+
 build: 
   build_steps: 
     - "apt update"
     - "apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git"
     - "pip install -r requirements.txt"
   image: "pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime"
-environment: 
-  node_selector: 
-    nvidiaDriver: "450"
+
+environment:
+  node_selector:
+    gpuMemory: "12"
   resources: 
     cpu: 
       limits: 4
@@ -18,9 +25,11 @@ environment:
     memory: 
       limits: 32000
       requests: 20000
+
 framework: pytorch
 kind: experiment
-params: 
+
+params:
   CUT_mode: CUT
   batch_size: 1
   dataroot: /Prostate_Reg_KM/Anonymized_cleaned/
@@ -34,7 +43,7 @@ params:
   load_init_models: /data/Prostate_Reg_KM/multitask/cut3d/50577/experiment_name
   load_mask: true
   lr: 0.000001
-  lr_Def: 0.00001
+  lr_Def: 0.0001
   lr_Reg: 0.00001
   lr_Seg: 0.00001
   lr_decay_iters: 1
@@ -50,40 +59,35 @@ params:
   output_nc: 1
   print_freq: 20
 
-run: 
-  cmd: "GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }}\\ 
-	--dataroot={{ dataroot }} \\ 
-	--dataset_mode={{ dataset_mode }} \\ 
-	--output_nc={{ output_nc }} \\ 
-	--input_nc={{ input_nc }} \\ 
-	--lr {{ lr }} \\ 
-	--lr_Def {{ lr_Def }} \\ 
-	--lr_Seg {{ lr_Seg }} \\ 
-	--lr_Reg {{ lr_Reg }} \\ 
-	--lr_policy={{ lr_policy }} \\ 
-	--display_freq={{ display_freq }} \\ 
-	--print_freq {{ print_freq }} 
-	--lr_decay_iters {{ lr_decay_iters }} \\ 
-	--epoch_count={{ epoch_count }} \\ 
-	--n_epochs={{ n_epochs }} \\ 
-	--n_epochs_decay {{ n_epochs_decay }} \\ 
-	--netG={{ netG }} \\ 
-	--CUT_mode={{ CUT_mode }} \\ 
-	--model={{ model }} \\ 
-	--load_mask={{ load_mask }} \\ 
-	--epochs_before_reg={{ epochs_before_reg }} \\ 
-	--epoch={{ epoch }} \\ 
-	--display_id={{ display_id }} \\ 
-	--load_init_models={{load_init_models}} \\ 
-	--ngf={{ ngf }} \\ 
-	--continue_train \\ 
-	--netReg={{ netReg }} \\ 
-	--netSeg={{ netSeg }} \\ 
-	--use_rigid_branch\\
+run:
+  cmd: "GEOMSTATS_BACKEND=pytorch python train.py \\
+    --batch_size {{ batch_size }} \\
+	--dataroot {{ dataroot }} \\
+	--dataset_mode {{ dataset_mode }} \\
+	--output_nc {{ output_nc }} \\
+	--input_nc {{ input_nc }} \\
+	--lr {{ lr }} \\
+	--lr_Def {{ lr_Def }} \\
+	--lr_Seg {{ lr_Seg }} \\
+	--lr_Reg {{ lr_Reg }} \\
+	--lr_policy {{ lr_policy }} \\
+	--display_freq {{ display_freq }} \\
+	--print_freq {{ print_freq }}
+	--lr_decay_iters {{ lr_decay_iters }} \\
+	--epoch_count {{ epoch_count }} \\
+	--n_epochs {{ n_epochs }} \\
+	--n_epochs_decay {{ n_epochs_decay }} \\
+	--netG={{ netG }} \\
+	--CUT_mode={{ CUT_mode }} \\
+	--model {{ model }} \\
+	--load_mask {{ load_mask }} \\
+	--epochs_before_reg {{ epochs_before_reg }} \\
+	--epoch {{ epoch }} \\
+	--display_id {{ display_id }} \\
+	--load_init_models {{load_init_models}} \\
+	--ngf {{ ngf }} \\
+	--continue_train \\
+	--netReg {{ netReg }} \\
+	--netSeg {{ netSeg }} \\
 	--reg_idt_B"
-
-
-tags: 
-  - Mutltitask
-  - HPTuning
-version: 1
+#	--use_rigid_branch \\
