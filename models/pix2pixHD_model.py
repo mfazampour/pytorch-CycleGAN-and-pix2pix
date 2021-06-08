@@ -117,16 +117,9 @@ class Pix2PixHDModel(BaseModel):
 
             # pix2pixHD
             self.fake_pool = ImagePool(opt.pool_size)
-            self.old_lr = opt.lr
             # self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss)
             self.criterionGAN = networks3d.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
             self.criterionFeat = torch.nn.L1Loss()
-
-            # pix2pix HD
-            if not opt.no_instance:
-                self.netG_input_nc += 1
-            if self.use_features:
-                self.netG_input_nc += opt.feat_num
 
         self.first_phase_coeff = 1
 

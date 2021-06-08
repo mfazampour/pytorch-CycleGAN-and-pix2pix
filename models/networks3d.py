@@ -481,21 +481,30 @@ class LocalEnhancer(nn.Module):
 
         self.downsample = ImageDenoise()
 
-    def forward(self, input):
+    def forward(self, input, encode_only=False):
         ### create input pyramid
         input_downsampled = [input]
         for i in range(self.n_local_enhancers):
             input_downsampled.append(self.downsample(input_downsampled[-1]))
 
+        feats = []
         ### output at coarest level
         coarse_out, output_prev = self.model_global(input_downsampled[-1])
+        if encode_only:
+            feats.append(output_prev)
         ### build up one layer at a time
         for n_local_enhancers in range(1, self.n_local_enhancers + 1):
             model_downsample = getattr(self, 'model' + str(n_local_enhancers) + '_1')
             model_upsample = getattr(self, 'model' + str(n_local_enhancers) + '_2')
             input_i = input_downsampled[self.n_local_enhancers - n_local_enhancers]
-            output_prev = model_upsample(model_downsample(input_i) + output_prev)
-        return output_prev, coarse_out
+            if encode_only:
+                feats.append(model_downsample(input_i))
+            elif not encode_only or (encode_only and n_local_enhancers != self.n_local_enhancers):
+                output_prev = model_upsample(model_downsample(input_i) + output_prev)
+        if encode_only:
+            return feats
+        else:
+            return output_prev, coarse_out
 
 
 class Normalize(nn.Module):

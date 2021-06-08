@@ -1,0 +1,78 @@
+--- 
+build: 
+  build_steps: 
+    - "apt update"
+    - "apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git"
+    - "pip install -r requirements.txt"
+  image: "pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime"
+
+environment:
+  node_selector: 
+    nvidiaDriver: "450"
+  resources: 
+    cpu: 
+      limits: 4
+      requests: 3
+    gpu: 
+      limits: 1
+      requests: 1
+    memory: 
+      limits: 32000
+      requests: 20000
+
+framework: pytorch
+kind: experiment
+
+params:
+  dataroot: '/Prostate_Reg_KM/Anonymized_cleaned/'
+  dataset_mode: "volume"
+  output_nc: 1
+  input_nc: 1
+  lr: 0.0002
+  lr_policy: "linear"
+  display_freq: 200
+  print_freq: 20
+  lr_decay_iters: 1
+  batch_size: 1
+  epoch_count: 0
+  n_epochs: 100
+  model: "cutHD3d"
+  name: "cutHD3d"
+  load_mask: True
+  display_id: -1
+  epoch: init
+  n_blocks_global: 4
+  n_blocks_local: 4
+  ngf: 64
+  CUT_mode: CUT
+
+
+run:
+    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --dataroot={{ dataroot }} \
+                                    --dataset_mode={{ dataset_mode }} \
+                                    --output_nc={{ output_nc }} \
+                                    --input_nc={{ input_nc }} \
+                                    --lr {{ lr }} \                          
+                                    --lr_policy={{ lr_policy }} \
+                                    --display_freq={{ display_freq }} \
+                                    --print_freq {{ print_freq }}
+                                    --lr_decay_iters {{ lr_decay_iters }} \
+                                    --epoch_count={{ epoch_count }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --model={{ model }} \
+                                    --load_mask={{ load_mask }} \
+                                    --n_blocks_global={{ n_blocks_global }} \
+                                    --n_blocks_local={{ n_blocks_local }} \
+                                    --ngf={{ ngf }} \
+                                    --dataset_mode={{dataset_mode}}\
+                                    --epoch={{ epoch }} \
+                                    --display_id={{ display_id }} \
+                                    --CUT_mode {{ CUT_mode }} \
+                                    --evalutate_freq 20
+                                    --load_mask true
+
+
+tags:
+  - CUT_HD
+version: 1
