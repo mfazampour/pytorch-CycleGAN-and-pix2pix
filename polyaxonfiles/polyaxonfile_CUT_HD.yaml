@@ -71,8 +71,9 @@ run:
                                     --CUT_mode {{ CUT_mode }} \
                                     --evalutate_freq 20
                                     --load_mask true
-
+                                    --no_ganFeat_loss
 
 tags:
   - CUT_HD
+  - no_ganFeat_loss
 version: 1

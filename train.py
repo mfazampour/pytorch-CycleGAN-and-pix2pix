@@ -155,13 +155,13 @@ def evaulate_model(dataset_val, model, total_iters, writer):
                 land_def.append(landmarks_def.item())
                 model.compute_landmark_loss()
                 model.compute_gt_dice()
-            model.log_tensorboard(writer=writer, losses=None, global_step=total_iters, save_gif=False,
-                                  use_image_name=True, mode='val')
+            model.log_tensorboard(writer=writer, losses=None, global_step=j, save_gif=False,
+                                  use_image_name=True, mode=f'val-{total_iters}')
         keys = losses.keys()
     for key in keys:
         loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
     for key in loss_aggregate:
-        writer.add_scalar(f'val-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
+        writer.add_scalar(f'val-{total_iters}-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
 
 
 if __name__ == '__main__':

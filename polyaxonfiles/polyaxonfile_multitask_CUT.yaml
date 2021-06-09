@@ -57,12 +57,13 @@ params:
   netSeg: unet_small
   ngf: 64
   output_nc: 1
-  print_freq: 20
+  print_freq: 200
 
 run:
   cmd: "GEOMSTATS_BACKEND=pytorch python train.py \\
     --batch_size {{ batch_size }} \\
 	--dataroot {{ dataroot }} \\
+	--no_html \\
 	--dataset_mode {{ dataset_mode }} \\
 	--output_nc {{ output_nc }} \\
 	--input_nc {{ input_nc }} \\
