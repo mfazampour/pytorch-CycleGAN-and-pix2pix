@@ -14,7 +14,7 @@ from monai.visualize import img2tensorboard
 from . import networks
 from collections import OrderedDict
 from util import affine_transform
-
+from util import tensorboard
 
 class CycleGAN3dModel(BaseModel):
     """
@@ -277,15 +277,15 @@ class CycleGAN3dModel(BaseModel):
                                              image_tensor=image3.squeeze(dim=0).cpu().detach().numpy(),
                                              global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 6)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.fake_A.detach().cpu(), axs=axs[0, :], img_name='fakeA')
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[1, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.rec_A.cpu(), axs=axs[2, :], img_name='recA')
+        axs, fig = tensorboard.init_figure(3, 6)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.fake_A.detach().cpu(), axs=axs[0, :], img_name='fakeA')
+        tensorboard.fill_subplots(self.real_A.cpu(), axs=axs[1, :], img_name='A')
+        tensorboard.fill_subplots(self.rec_A.cpu(), axs=axs[2, :], img_name='recA')
 
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[3, :], img_name='fakeB')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[4, :], img_name='B')
-        vxm.torch.utils.fill_subplots(self.rec_B.cpu(), axs=axs[5, :], img_name='recB')
+        tensorboard.fill_subplots(self.fake_B.detach().cpu(), axs=axs[3, :], img_name='fakeB')
+        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[4, :], img_name='B')
+        tensorboard.fill_subplots(self.rec_B.cpu(), axs=axs[5, :], img_name='recB')
 
 
         if use_image_name:

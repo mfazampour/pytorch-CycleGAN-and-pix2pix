@@ -11,6 +11,7 @@ from .base_model import BaseModel
 from .multitask_parent import Multitask
 from . import networks3d
 from torch.utils.tensorboard import SummaryWriter
+from util import tensorboard
 from monai.visualize import img2tensorboard
 from util import affine_transform
 
@@ -268,42 +269,42 @@ class DefRegModel(BaseModel, Multitask):
     def add_deformable_figures(self, mode, global_step, writer, use_image_name=False):
         n = 8 if self.mask_B is None else 10
         n = n+1 if self.opt.use_mask else n
-        axs, fig = vxm.torch.utils.init_figure(3, n)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
+        axs, fig = tensorboard.init_figure(3, n)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.fixed.detach().cpu(), axs=axs[3, :], img_name='Fixed')
-        vxm.torch.utils.fill_subplots(self.deformed_moving.detach().cpu(), axs=axs[4, :], img_name='Deformed')
-        vxm.torch.utils.fill_subplots((self.deformed_moving.detach() - self.moving).abs().cpu(), axs=axs[5, :], img_name='Deformed - moving')
+        tensorboard.fill_subplots(self.fixed.detach().cpu(), axs=axs[3, :], img_name='Fixed')
+        tensorboard.fill_subplots(self.deformed_moving.detach().cpu(), axs=axs[4, :], img_name='Deformed')
+        tensorboard.fill_subplots((self.deformed_moving.detach() - self.moving).abs().cpu(), axs=axs[5, :], img_name='Deformed - moving')
         overlay = self.moving.repeat(1, 3, 1, 1, 1)
         overlay *= 0.8
         overlay[:, 0:1, ...] += self.fixed.detach() * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Moving overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Moving overlay', cmap=None)
         overlay = self.deformed_moving.repeat(1, 3, 1, 1, 1)
         overlay *= 0.8
         overlay[:, 0:1, ...] += self.fixed.detach() * 0.6
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Deformed overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Deformed overlay', cmap=None)
         idx = 8
         if self.opt.use_mask:
-            vxm.torch.utils.fill_subplots(self.fov_mask.int().detach().cpu(), axs=axs[idx, :], img_name='FoV mask')
+            tensorboard.fill_subplots(self.fov_mask.int().detach().cpu(), axs=axs[idx, :], img_name='FoV mask')
             idx += 1
         if self.mask_B is not None:
             overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_moving.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask moving on fixed', cmap=None)
+            tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask moving on fixed', cmap=None)
             idx += 1
 
             overlay = self.mask_fixed.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_def.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask warped on fixed', cmap=None)
+            tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='mask warped on fixed', cmap=None)
         #
         if use_image_name:
             tag = mode + f'{self.patient}/Deformable'

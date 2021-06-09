@@ -7,10 +7,12 @@ from typing import Tuple
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+import util.util as util
 from util import affine_transform
 from util import distance_landmarks
 from . import networks
 from . import networks3d
+from util import tensorboard
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
@@ -256,8 +258,8 @@ class Multitask:
 
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
             self.loss_moving_dice = compute_meandice(one_hot_moving, one_hot_fixed, include_background=False)
-            loss_beginning_dice = compute_meandice( one_hot_moving, one_hot_fixed,include_background=False)
-            self.diff_dice = loss_beginning_dice - self.loss_warped_dice
+            # loss_beginning_dice = compute_meandice(one_hot_moving, one_hot_fixed,include_background=False)
+            self.diff_dice = self.loss_warped_dice - self.loss_moving_dice
 
         else:
             self.loss_warped_dice = None
@@ -446,41 +448,43 @@ class Multitask:
 
     def add_deformable_figures(self, mode, real_A, real_B, global_step, writer, use_image_name=False):
         n = 8 if self.mask_B is None else 10
-        axs, fig = vxm.torch.utils.init_figure(3, n)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
+        axs, fig = tensorboard.init_figure(3, n)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 0:1, ...], axs=axs[0, :], img_name='Def. X', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 1:2, ...], axs=axs[1, :], img_name='Def. Y', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
+        tensorboard.fill_subplots(self.dvf.cpu()[:, 2:3, ...], axs=axs[2, :], img_name='Def. Z', cmap='RdBu',
                                       fig=fig, show_colorbar=True)
-        vxm.torch.utils.fill_subplots(self.deformed_A.detach().cpu(), axs=axs[3, :], img_name='Deformed')
-        vxm.torch.utils.fill_subplots((self.deformed_A.detach() - real_A).abs().cpu(),
+        tensorboard.fill_subplots(self.deformed_A.detach().cpu(), axs=axs[3, :], img_name='Deformed')
+        tensorboard.fill_subplots((self.deformed_A.detach() - real_A).abs().cpu(),
                                       axs=axs[4, :], img_name='Deformed - moving')
         overlay = real_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay *= 0.8
         overlay[:, 0:1, ...] += (0.5 * real_B.detach() + 0.5) * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Moving overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[5, :], img_name='Moving overlay', cmap=None)
         overlay = self.deformed_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay *= 0.8
         overlay[:, 0:1, ...] += (0.5 * real_B.detach() + 0.5) * 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Deformed overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Deformed overlay', cmap=None)
         overlay = self.mask_A.repeat(1, 3, 1, 1, 1)
         overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
         overlay[:, 2, ...] = 0
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[7, :], img_name='Def. mask overlay', cmap=None)
         if self.mask_B is not None:
             overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_A.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[8, :], img_name='mask moving on US', cmap=None)
+            tensorboard.fill_subplots(overlay.cpu(), axs=axs[8, :],
+                                      img_name=f'mask moving on US\nDice {self.loss_warped_dice.item():.3f}', cmap=None)
 
             overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
             overlay[:, 2, ...] = 0
-            vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[9, :], img_name='mask warped on US', cmap=None)
+            tensorboard.fill_subplots(overlay.cpu(), axs=axs[9, :],
+                                      img_name=f'mask warped on US\nDice {self.loss_warped_dice.item():.3f}', cmap=None)
         #
         if use_image_name:
             tag = mode + f'{self.patient}/Deformable'
@@ -489,12 +493,12 @@ class Multitask:
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_rigid_figures(self, mode, global_step, writer, use_image_name=False):
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
-        vxm.torch.utils.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
-        vxm.torch.utils.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff orig')
-        vxm.torch.utils.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
+        axs, fig = tensorboard.init_figure(3, 4)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.diff_A.cpu(), axs=axs[0, :], img_name='Diff A')
+        tensorboard.fill_subplots(self.diff_B.cpu(), axs=axs[1, :], img_name='Diff B')
+        tensorboard.fill_subplots(self.diff_orig.cpu(), axs=axs[2, :], img_name='Diff orig')
+        tensorboard.fill_subplots(self.deformed_B.detach().cpu(), axs=axs[3, :], img_name='Transformed')
 
         if use_image_name:
             tag = mode + f'{self.patient}/Rigid'
@@ -503,30 +507,30 @@ class Multitask:
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
-        axs, fig = vxm.torch.utils.init_figure(3, 7)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
-        vxm.torch.utils.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg fake US')
+        axs, fig = tensorboard.init_figure(3, 7)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
+        tensorboard.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg fake US')
 
         overlay = fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.seg_fake_B.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Fake mask overlay', cmap=None)
-        vxm.torch.utils.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[3, :], img_name='Deformed mask')
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Fake mask overlay', cmap=None)
+        tensorboard.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[3, :], img_name='Deformed mask')
 
         overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. mask overlay', cmap=None)
-        vxm.torch.utils.fill_subplots(self.seg_B.detach().cpu(), axs=axs[5, :], img_name='Seg. US')
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. mask overlay', cmap=None)
+        tensorboard.fill_subplots(self.seg_B.detach().cpu(), axs=axs[5, :], img_name='Seg. US')
 
         overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
         if use_image_name:
             tag = mode + f'{self.patient}/Segmentation'
         else:
@@ -550,8 +554,9 @@ class Multitask:
                               global_step=global_step)
         if self.diff_dice is not None:
             writer.add_scalar(mode + 'DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
-        if self.loss_warped_dice is not None:
             writer.add_scalar(mode + 'DICE/deformed', scalar_value=self.loss_warped_dice,
+                              global_step=global_step)
+            writer.add_scalar(mode + 'DICE/moving', scalar_value=self.loss_moving_dice,
                               global_step=global_step)
 
     def get_current_landmark_distances(self):

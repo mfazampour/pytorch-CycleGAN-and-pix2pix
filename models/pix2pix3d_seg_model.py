@@ -7,6 +7,7 @@ from collections import OrderedDict
 from torch.utils.tensorboard import SummaryWriter
 
 import util.util as util
+from util import tensorboard
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from .pix2pix3d_model import Pix2Pix3dModel
@@ -187,14 +188,14 @@ class Pix2Pix3dSegModel(Pix2Pix3dModel):
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
                         save_gif=True, use_image_name=False, mode=''):
-        axs, fig = vxm.torch.utils.init_figure(3, 6)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[3, :], img_name='Mask A')
-        vxm.torch.utils.fill_subplots(self.seg_A.detach().cpu(), axs=axs[4, :], img_name='Seg Fake')
-        vxm.torch.utils.fill_subplots(self.seg_B.cpu(), axs=axs[5, :], img_name='Seg B')
+        axs, fig = tensorboard.init_figure(3, 6)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        tensorboard.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[3, :], img_name='Mask A')
+        tensorboard.fill_subplots(self.seg_A.detach().cpu(), axs=axs[4, :], img_name='Seg Fake')
+        tensorboard.fill_subplots(self.seg_B.cpu(), axs=axs[5, :], img_name='Seg B')
 
         writer.add_figure(tag='volumes', figure=fig, global_step=global_step)
 

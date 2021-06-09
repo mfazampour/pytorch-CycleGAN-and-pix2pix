@@ -7,6 +7,7 @@ from voxelmorph import voxelmorph as vxm
 from torch.utils.tensorboard import SummaryWriter
 from monai.visualize import img2tensorboard
 from util import affine_transform
+from util import tensorboard
 
 from . import networks
 
@@ -196,11 +197,11 @@ class Pix2Pix3dModel(BaseModel):
                                              global_step=global_step)
 
 
-        axs, fig = vxm.torch.utils.init_figure(3, 3)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        axs, fig = tensorboard.init_figure(3, 3)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        tensorboard.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
         if use_image_name:
             tag = mode + f'{self.patient}/GAN'
         else:

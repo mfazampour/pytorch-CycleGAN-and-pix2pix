@@ -11,6 +11,7 @@ from . import networks
 from . import networks3d
 from .patchnce import PatchNCELoss
 import util.util as util
+from util import tensorboard
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
@@ -284,12 +285,12 @@ class CUT3dModel(BaseModel):
                                              image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
                                              global_step=global_step)
 
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
-        vxm.torch.utils.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        vxm.torch.utils.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-        vxm.torch.utils.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
+        axs, fig = tensorboard.init_figure(3, 4)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
+        tensorboard.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
+        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
+        tensorboard.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
         if use_image_name:
             tag = mode + f'{self.patient}/GAN'
         else:

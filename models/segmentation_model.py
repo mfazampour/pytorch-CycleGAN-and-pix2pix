@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from util import tensorboard
 
 from .base_model import BaseModel
 from . import networks
@@ -88,21 +89,21 @@ class SegmentationModel(BaseModel):
         for key in losses:
             writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
         seg_A = torch.argmax(self.seg_A, dim=1, keepdim=True)
-        axs, fig = vxm.torch.utils.init_figure(3, 4)
-        vxm.torch.utils.set_axs_attribute(axs)
-        vxm.torch.utils.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
-        vxm.torch.utils.fill_subplots(seg_A.detach().cpu(), axs=axs[1, :], img_name='Seg MR')
+        axs, fig = tensorboard.init_figure(3, 4)
+        tensorboard.set_axs_attribute(axs)
+        tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
+        tensorboard.fill_subplots(seg_A.detach().cpu(), axs=axs[1, :], img_name='Seg MR')
 
         overlay = self.data_A.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * seg_A.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Seg mask overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Seg mask overlay', cmap=None)
 
         overlay = self.data_A.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.mask_A.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        vxm.torch.utils.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Input mask overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Input mask overlay', cmap=None)
 
         writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
