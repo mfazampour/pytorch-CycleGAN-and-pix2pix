@@ -5,6 +5,7 @@ os.environ["TORCHIO_HIDE_CITATION_PROMPT"] = str(1)
 import random
 import torchvision.transforms as transforms
 import torch
+import torch.nn.functional as F
 from data.base_dataset import BaseDataset
 from util import create_landmarks
 # from data.image_folder import make_dataset
@@ -121,19 +122,29 @@ class VolumeDataset(BaseDataset):
 
     @staticmethod
     def lee_filter_creator(size: int):
-        def lee_filter(x: torch.Tensor):
-            img = x.squeeze().cpu().numpy()
-            img_mean = uniform_filter(img, [size]*len(img.shape))
-            img_sqr_mean = uniform_filter(img ** 2, [size] * len(img.shape))
+        def lee_filter(img: torch.Tensor):
+            img_mean = F.conv3d(img, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
+            img_sqr_mean = F.conv3d(img ** 2, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
             img_variance = img_sqr_mean - img_mean ** 2
-
-            overall_variance = variance(img)
+            overall_variance = torch.var(img)
 
             img_weights = img_variance / (img_variance + overall_variance)
             img_output = img_mean + img_weights * (img - img_mean)
-            img = torch.tensor(img_output, device=x.device, dtype=x.dtype)
-            img = torch.reshape(img, x.shape)
-            return img
+            return img_output
+
+        # def lee_filter(x: torch.Tensor):
+        #     img = x.squeeze().cpu().numpy()
+        #     img_mean = uniform_filter(img, [size]*len(img.shape))
+        #     img_sqr_mean = uniform_filter(img ** 2, [size] * len(img.shape))
+        #     img_variance = img_sqr_mean - img_mean ** 2
+        #
+        #     overall_variance = variance(img)
+        #
+        #     img_weights = img_variance / (img_variance + overall_variance)
+        #     img_output = img_mean + img_weights * (img - img_mean)
+        #     img = torch.tensor(img_output, device=x.device, dtype=x.dtype)
+        #     img = torch.reshape(img, x.shape)
+        #     return img
         return lee_filter
 
     def create_transforms(self):
