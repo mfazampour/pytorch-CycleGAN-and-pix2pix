@@ -1385,9 +1385,6 @@ class ContentEncoder3d(nn.Module):
         else:
             return self.model(x), None
 
-        for layer_id, layer in enumerate(self.model):
-            print(layer_id, layer)
-
 
 class DecoderAll3d(nn.Module):
     def __init__(self, n_upsample, n_res, dim, output_dim, norm='batch', activ='relu', pad_type='zero', nz=0):

@@ -144,11 +144,9 @@ class CUTHD3dModel(BaseModel):
             # define loss functions
             self.criterionGAN_syn = networks3d.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
             self.criterionNCE = []
-
             for _ in range(self.opt.n_local_enhancers + 1):
                 self.criterionNCE.append(PatchNCELoss(opt).to(self.device))
-
-            self.criterionIdt = torch.nn.L1Loss().to(self.device)
+            self.criterionFeat = torch.nn.L1Loss()
 
             params = list(self.netG.parameters())
             self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, opt.beta2))
@@ -163,7 +161,7 @@ class CUTHD3dModel(BaseModel):
             self.old_lr = opt.lr
             # self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss)
             # self.criterionGAN = networks3d.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)
-            self.criterionFeat = torch.nn.L1Loss()
+
 
 
     def data_dependent_initialize(self, data):
@@ -219,7 +217,7 @@ class CUTHD3dModel(BaseModel):
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
-        self.real_B_dn = self.denoiser(self.real_B)
+
         self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device)
         self.landmarks_B = input['B_landmark'].to(self.device)
@@ -235,8 +233,13 @@ class CUTHD3dModel(BaseModel):
         # Both real_B and real_A if we also use the loss from the identity mapping: NCE(G(Y), Y)) in NCE loss
 
         self.real = torch.cat((self.real_A, self.real_B), dim=0) if self.opt.nce_idt else self.real_A
-        self.real_dn = self.denoiser(self.real)
-        self.real_A_dn = self.denoiser(self.real_A)
+        self.real_dn = torch.clone(self.real)
+        self.real_A_dn = torch.clone(self.real_A)
+        self.real_B_dn = torch.clone(self.real_B)
+        for _ in range(self.opt.n_local_enhancers):
+            self.real_A_dn = self.denoiser(self.real_A_dn)
+            self.real_dn = self.denoiser(self.real_dn)
+            self.real_B_dn = self.denoiser(self.real_B_dn)
         # Inspired by GcGAN, FastCUT is trained with flip-equivariance augmentation, where
         # the input image to the generator is horizontally flipped, and the output features
         # are flipped back before computing the PatchNCE loss

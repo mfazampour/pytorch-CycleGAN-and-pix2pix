@@ -143,11 +143,4 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel, Multitask):
         if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
 
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False, mode=''):
-        super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
-                                save_gif=save_gif, use_image_name=use_image_name, mode=mode)
-        self.log_mt_tensorboard(self.real_A, self.real_B, self.fake_B, writer, losses, global_step,
-                                use_image_name, mode)
-
 

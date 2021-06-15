@@ -139,6 +139,8 @@ class CycleGan3dMultiTaskModel(CycleGAN3dModel, Multitask):
         if (1 - self.first_phase_coeff) == 0:
             return
         for _ in range(self.opt.vxm_iteration_steps):
+            self.set_requires_grad(self.netDefReg, True)
+            self.set_requires_grad(self.netSeg, True)
             self.optimizer_DefReg.zero_grad()
             self.optimizer_Seg.zero_grad()
             self.backward_DefReg_Seg()  # only back propagate through fake_B once
@@ -155,11 +157,3 @@ class CycleGan3dMultiTaskModel(CycleGAN3dModel, Multitask):
         super().update_learning_rate(epoch)
         if epoch >= self.opt.epochs_before_reg:
             self.first_phase_coeff = 0
-
-    def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False, mode=''):
-        super().log_tensorboard(writer=writer, losses=losses, global_step=global_step,
-                                save_gif=save_gif, use_image_name=use_image_name, mode=mode)
-
-        self.log_mt_tensorboard(self.real_A, self.real_B, self.fake_B, writer, losses, global_step,
-                                use_image_name, mode)
