@@ -40,7 +40,8 @@ params:
   epoch_count: 0
   epochs_before_reg: 0
   input_nc: 1
-  load_init_models: /data/Prostate_Reg_KM/multitask/cut3d/50577/experiment_name
+  load_init_models: /data/Prostate_Reg_KM/multitask/cut3d/fixed/
+  #/data/Prostate_Reg_KM/multitask/cut3d/50577/experiment_name
   load_mask: true
   lr: 0.000001
   lr_Def: 0.0001
@@ -60,35 +61,36 @@ params:
   print_freq: 200
 
 run:
-  cmd: "GEOMSTATS_BACKEND=pytorch python train.py \\
-    --batch_size {{ batch_size }} \\
-	--dataroot {{ dataroot }} \\
-	--no_html \\
-	--dataset_mode {{ dataset_mode }} \\
-	--output_nc {{ output_nc }} \\
-	--input_nc {{ input_nc }} \\
-	--lr {{ lr }} \\
-	--lr_Def {{ lr_Def }} \\
-	--lr_Seg {{ lr_Seg }} \\
-	--lr_Reg {{ lr_Reg }} \\
-	--lr_policy {{ lr_policy }} \\
-	--display_freq {{ display_freq }} \\
-	--print_freq {{ print_freq }}
-	--lr_decay_iters {{ lr_decay_iters }} \\
-	--epoch_count {{ epoch_count }} \\
-	--n_epochs {{ n_epochs }} \\
-	--n_epochs_decay {{ n_epochs_decay }} \\
-	--netG={{ netG }} \\
-	--CUT_mode={{ CUT_mode }} \\
-	--model {{ model }} \\
-	--load_mask {{ load_mask }} \\
-	--epochs_before_reg {{ epochs_before_reg }} \\
-	--epoch {{ epoch }} \\
-	--display_id {{ display_id }} \\
-	--load_init_models {{load_init_models}} \\
-	--ngf {{ ngf }} \\
-	--continue_train \\
-	--netReg {{ netReg }} \\
-	--netSeg {{ netSeg }} \\
-	--reg_idt_B"
+  cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --dataroot {{ dataroot }} \
+                                    --no_html \
+                                    --dataset_mode {{ dataset_mode }} \
+                                    --output_nc {{ output_nc }} \
+                                    --input_nc {{ input_nc }} \
+                                    --lr {{ lr }} \
+                                    --lr_Def {{ lr_Def }} \
+                                    --lr_Seg {{ lr_Seg }} \
+                                    --lr_Reg {{ lr_Reg }} \
+                                    --lr_policy {{ lr_policy }} \
+                                    --display_freq {{ display_freq }} \
+                                    --print_freq {{ print_freq }} \
+                                    --lr_decay_iters {{ lr_decay_iters }} \
+                                    --epoch_count {{ epoch_count }} \
+                                    --n_epochs {{ n_epochs }} \
+                                    --n_epochs_decay {{ n_epochs_decay }} \
+                                    --netG {{ netG }} \
+                                    --CUT_mode {{ CUT_mode }} \
+                                    --model {{ model }} \
+                                    --load_mask {{ load_mask }} \
+                                    --epochs_before_reg {{ epochs_before_reg }} \
+                                    --epoch {{ epoch }} \
+                                    --display_id {{ display_id }} \
+                                    --load_init_models {{ load_init_models }}
+                                    --ngf {{ ngf }} \
+                                    --continue_train \
+                                    --netReg {{ netReg }} \
+                                    --netSeg {{ netSeg }} \
+                                    --nce_layers "0,1,2,3" \
+                                    --reg_idt_B
 #	--use_rigid_branch \\

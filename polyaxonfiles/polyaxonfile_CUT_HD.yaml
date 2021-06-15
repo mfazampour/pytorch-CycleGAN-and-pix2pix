@@ -8,7 +8,7 @@ build:
 
 environment:
   node_selector: 
-    nvidiaDriver: "450"
+    gpuMemory: "12"
   resources: 
     cpu: 
       limits: 4
@@ -28,14 +28,15 @@ params:
   dataset_mode: "volume"
   output_nc: 1
   input_nc: 1
-  lr: 0.0002
+  lr: 0.00002
   lr_policy: "linear"
   display_freq: 200
   print_freq: 20
   lr_decay_iters: 1
   batch_size: 1
   epoch_count: 0
-  n_epochs: 100
+  n_epochs: 50
+  n_epochs_decay: 50
   model: "cutHD3d"
   name: "cutHD3d"
   load_mask: True
@@ -60,6 +61,7 @@ run:
                                     --lr_decay_iters {{ lr_decay_iters }} \
                                     --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
+                                    --n_epochs_decay={{ n_epochs_decay }} \
                                     --model={{ model }} \
                                     --load_mask={{ load_mask }} \
                                     --n_blocks_global={{ n_blocks_global }} \
@@ -69,7 +71,7 @@ run:
                                     --epoch={{ epoch }} \
                                     --display_id={{ display_id }} \
                                     --CUT_mode {{ CUT_mode }} \
-                                    --evalutate_freq 20
+                                    --evaluation_freq 20
                                     --load_mask true
                                     --no_ganFeat_loss
 
