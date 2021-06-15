@@ -3,12 +3,16 @@ from typing import List
 import torch
 import torch.nn.functional as F
 import numpy as np
+import rising
+from rising.transforms.functional import affine as rising_affine
+
 try:
     import napari
 except:
     print("failed to load napari")
 
 from util import se3
+
 
 def set_border_value(img: torch.Tensor, value=None):
     if value is None:
@@ -75,12 +79,14 @@ def tensor_vector_to_matrix(t: torch.Tensor):
         affines[i, ...] = affine
     return affines.to(t.device)
 
+
 def tensor_matrix_to_vector(t: torch.Tensor):
     vectors = torch.zeros((t.shape[0], 6), dtype=t.dtype)
     for i in range(t.shape[0]):
         vector = se3.matrix_to_vector(t[i, :].cpu())
         vectors[i, ...] = vector
     return vectors.to(t.device)
+
 
 def show_volumes(img_list: List[torch.Tensor]):
     img_list_np = []
@@ -92,3 +98,12 @@ def show_volumes(img_list: List[torch.Tensor]):
     except:
         print("failed to load napari")
 
+
+def apply_random_affine(img: torch.Tensor, affine: torch.Tensor = None, rotation=10, translation=10, batchsize=1, interp_mode='bilinear'):
+    rotation = (2 * np.random.rand(3) - 1) * rotation
+    translation = (2 * np.random.rand(3) - 1) * translation
+    if affine is None:
+        affine = rising_affine.parametrize_matrix(scale=1, rotation=rotation, translation=translation, ndim=3,
+                                                  batchsize=batchsize, device='cuda')
+    img = rising_affine.affine_image_transform(img, affine, interpolation_mode=interp_mode, padding_mode='border')
+    return img, affine

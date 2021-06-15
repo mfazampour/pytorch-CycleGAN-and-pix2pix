@@ -57,6 +57,7 @@ class Multitask:
             parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'], help='type of the similarity used for training voxelmorph')
             parser.add_argument('--epochs_before_reg', type=int, default=0, help='number of epochs to train the network before reg loss is used')
             parser.add_argument('--image-loss', default='mse', help='image reconstruction loss - can be mse or ncc (default: mse)')
+            parser.add_argument('--augment_segmentation', action='store_true', help='Augment data before segmenting')
         return parser
 
 
@@ -114,6 +115,7 @@ class Multitask:
         loss_names += ['RigidReg_fake', 'RigidReg_real']
         loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
         loss_names += ['landmarks']
+        loss_names += ['diff_dice', 'moving_dice', 'warped_dice']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
 
@@ -224,8 +226,18 @@ class Multitask:
             self.dvf = self.resizer(self.dvf)
         self.deformed_A = self.transformer_intensity(real_A, self.dvf.detach())
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
-        self.seg_B = self.netSeg(fixed)
-        self.seg_fake_B = self.netSeg(fake_B)
+
+        if self.opt.augment_segmentation:
+            self.augmented_B, affine = affine_transform.apply_random_affine(
+                torch.cat([fake_B, fixed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
+            self.augmented_mask, _ = affine_transform.apply_random_affine(
+                torch.cat([self.mask_A, self.mask_A_deformed], dim=0), affine=affine, batchsize=2)
+            seg_ = self.netSeg(self.augmented_B)
+            self.seg_fake_B = seg_[:self.opt.batch_size, ...]
+            self.seg_B = seg_[self.opt.batch_size:, ...]
+        else:
+            self.seg_B = self.netSeg(fixed)
+            self.seg_fake_B = self.netSeg(fake_B)
         self.Landmark_A_dvf = self.transformer_label(self.landmarks_A, self.dvf.detach())
         self.compute_gt_dice()
         self.compute_landmark_loss()
@@ -258,14 +270,12 @@ class Multitask:
 
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
             self.loss_moving_dice = compute_meandice(one_hot_moving, one_hot_fixed, include_background=False)
-            # loss_beginning_dice = compute_meandice(one_hot_moving, one_hot_fixed,include_background=False)
-            self.diff_dice = self.loss_warped_dice - self.loss_moving_dice
+            self.loss_diff_dice = self.loss_warped_dice - self.loss_moving_dice
 
         else:
             self.loss_warped_dice = None
             self.loss_moving_dice = None
-            self.diff_dice = None
-
+            self.loss_diff_dice = None
 
     def compute_landmark_loss(self):
 
@@ -349,12 +359,12 @@ class Multitask:
         self.loss_DefReg += self.loss_DefRgl
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
-        seg_B = self.netSeg(fixed)
-        dvf_resized = self.resizer(dvf)
-        mask_A_deformed = self.transformer_label(self.mask_A, dvf_resized)
-        self.loss_Seg_real = self.criterionSeg(seg_B, mask_A_deformed)
+        self.loss_Seg_real = self.criterionSeg(self.seg_B, self.mask_A_deformed)
 
-        seg_fake_B = self.netSeg(fake_B.detach())
+        if self.opt.augment_segmentation:
+            seg_fake_B = self.netSeg(self.augmented_B[:self.opt.batch_size, ...].detach())
+        else:
+            seg_fake_B = self.netSeg(fake_B.detach())
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
@@ -436,7 +446,7 @@ class Multitask:
         self.deformed_B_center_axi = self.deformed_A[..., n_c]
 
 
-    def log_mt_tensorboard(self, real_A, real_B, fake_B, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
+    def log_mt_tensorboard(self, real_A, real_B, fake_B, writer: SummaryWriter, global_step: int = 0,
                            use_image_name=False, mode=''):
         self.add_rigid_figures(mode, global_step, writer, use_image_name=use_image_name)
 
@@ -477,19 +487,21 @@ class Multitask:
             overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_A.detach()
             overlay[:, 2, ...] = 0
+            dice = self.loss_moving_dice.item() if self.loss_moving_dice is not None else -1
             tensorboard.fill_subplots(overlay.cpu(), axs=axs[8, :],
-                                      img_name=f'mask moving on US\nDice {self.loss_warped_dice.item():.3f}', cmap=None)
+                                      img_name=f'mask moving on US\nDice {dice:.3f}', cmap=None)
 
             overlay = self.mask_B.repeat(1, 3, 1, 1, 1)
             overlay[:, 0:1, ...] = self.mask_A_deformed.detach()
             overlay[:, 2, ...] = 0
+            dice = self.loss_warped_dice.item() if self.loss_warped_dice is not None else -1
             tensorboard.fill_subplots(overlay.cpu(), axs=axs[9, :],
-                                      img_name=f'mask warped on US\nDice {self.loss_warped_dice.item():.3f}', cmap=None)
+                                      img_name=f'mask warped on US\nDice {dice:.3f}', cmap=None)
         #
         if use_image_name:
             tag = mode + f'{self.patient}/Deformable'
         else:
-            tag = mode + 'Deformable'
+            tag = mode + '/Deformable'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_rigid_figures(self, mode, global_step, writer, use_image_name=False):
@@ -503,60 +515,73 @@ class Multitask:
         if use_image_name:
             tag = mode + f'{self.patient}/Rigid'
         else:
-            tag = mode + 'Rigid'
+            tag = mode + '/Rigid'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
-        axs, fig = tensorboard.init_figure(3, 7)
+        if self.opt.augment_segmentation:
+            axs, fig = tensorboard.init_figure(3, 8)
+        else:
+            axs, fig = tensorboard.init_figure(3, 7)
         tensorboard.set_axs_attribute(axs)
         tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
-        tensorboard.fill_subplots(self.seg_fake_B.detach().cpu(), axs=axs[1, :], img_name='Seg fake US')
-
+        with torch.no_grad():
+            seg_fake_B = self.netSeg(self.fake_B.detach())
+            seg_fake_B = torch.argmax(seg_fake_B, dim=1, keepdim=True)
+            tensorboard.fill_subplots(seg_fake_B.cpu(), axs=axs[1, :], img_name='Seg fake US')
+        idx = 2
+        if self.opt.augment_segmentation:
+            tensorboard.fill_subplots(self.augmented_B[1:, ...].detach().cpu(), axs=axs[idx, :], img_name='Real US augmented')
+            idx += 1
         overlay = fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.seg_fake_B.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        tensorboard.fill_subplots(overlay.cpu(), axs=axs[2, :], img_name='Fake mask overlay', cmap=None)
-        tensorboard.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[3, :], img_name='Deformed mask')
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Fake mask overlay', cmap=None)
+        idx += 1
+        tensorboard.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[idx, :], img_name='Deformed mask')
+        idx += 1
 
         overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        tensorboard.fill_subplots(overlay.cpu(), axs=axs[4, :], img_name='Def. mask overlay', cmap=None)
-        tensorboard.fill_subplots(self.seg_B.detach().cpu(), axs=axs[5, :], img_name='Seg. US')
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Def. mask overlay', cmap=None)
+        idx += 1
+        tensorboard.fill_subplots(self.seg_B.detach().cpu(), axs=axs[idx, :], img_name='Seg. US')
+        idx += 1
 
         overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
-        tensorboard.fill_subplots(overlay.cpu(), axs=axs[6, :], img_name='Seg. US overlay', cmap=None)
+        tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Seg. US overlay', cmap=None)
         if use_image_name:
             tag = mode + f'{self.patient}/Segmentation'
         else:
-            tag = mode + 'Segmentation'
+            tag = mode + '/Segmentation'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_landmark_losses(self, mode, global_step, writer, use_image_name=False):
 
         if self.loss_landmarks_rigid_diff is not None:
-            writer.add_scalar(mode + 'landmarks/difference_rigid',
+            writer.add_scalar(mode + '/landmarks/difference_rigid',
                               scalar_value=self.loss_landmarks_rigid_diff,
                               global_step=global_step)
         if self.loss_landmarks_rigid is not None:
-            writer.add_scalar(mode + 'landmarks/rigid', scalar_value=self.loss_landmarks_rigid,
+            writer.add_scalar(mode + '/landmarks/rigid', scalar_value=self.loss_landmarks_rigid,
                               global_step=global_step)
         if self.loss_landmarks_def is not None:
-            writer.add_scalar(mode + 'landmarks/def', scalar_value=self.loss_landmarks_def,
+            writer.add_scalar(mode + '/landmarks/def', scalar_value=self.loss_landmarks_def,
                               global_step=global_step)
         if self.loss_landmarks_def_diff is not None:
-            writer.add_scalar(mode + 'landmarks/difference_def', scalar_value=self.loss_landmarks_def_diff,
+            writer.add_scalar(mode + '/landmarks/difference_def', scalar_value=self.loss_landmarks_def_diff,
                               global_step=global_step)
-        if self.diff_dice is not None:
-            writer.add_scalar(mode + 'DICE/difference', scalar_value=self.diff_dice, global_step=global_step)
-            writer.add_scalar(mode + 'DICE/deformed', scalar_value=self.loss_warped_dice,
+        if self.loss_diff_dice is not None:
+            writer.add_scalar(mode + '/DICE/difference', scalar_value=self.loss_diff_dice, global_step=global_step)
+            writer.add_scalar(mode + '/DICE/deformed', scalar_value=self.loss_warped_dice,
                               global_step=global_step)
-            writer.add_scalar(mode + 'DICE/moving', scalar_value=self.loss_moving_dice,
+            writer.add_scalar(mode + '/DICE/moving', scalar_value=self.loss_moving_dice,
                               global_step=global_step)
 
     def get_current_landmark_distances(self):

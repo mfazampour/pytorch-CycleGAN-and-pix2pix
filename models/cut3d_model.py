@@ -108,7 +108,6 @@ class CUT3dModel(BaseModel):
             for nce_layer in self.nce_layers:
                 self.criterionNCE.append(PatchNCELoss(opt).to(self.device))
 
-            self.criterionIdt = torch.nn.L1Loss().to(self.device)
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
@@ -169,6 +168,7 @@ class CUT3dModel(BaseModel):
         self.patient = input['Patient']
         self.landmarks_A = input['A_landmark'].to(self.device)
         self.landmarks_B = input['B_landmark'].to(self.device)
+        self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
     def forward(self):
@@ -285,16 +285,19 @@ class CUT3dModel(BaseModel):
                                              image_tensor=((self.idt_B * 0.5) + 0.5).squeeze(dim=0).cpu().detach().numpy(),
                                              global_step=global_step)
 
-        axs, fig = tensorboard.init_figure(3, 4)
+        axs, fig = tensorboard.init_figure(3, 5)
         tensorboard.set_axs_attribute(axs)
         tensorboard.fill_subplots(self.real_A.cpu(), axs=axs[0, :], img_name='A')
         tensorboard.fill_subplots(self.fake_B.detach().cpu(), axs=axs[1, :], img_name='fake')
-        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[2, :], img_name='B')
-        tensorboard.fill_subplots(self.idt_B.cpu(), axs=axs[3, :], img_name='idt_B')
+        overlay = util.create_overlaid_tensor(self.fake_B.detach() * 0.5 + 0.5, self.mask_A)
+        tensorboard.fill_subplots(overlay.detach().cpu(), axs=axs[2, :], img_name='mask overlaid on fake')
+        tensorboard.fill_subplots(self.real_B.cpu(), axs=axs[3, :], img_name='B')
+        tensorboard.fill_subplots(self.idt_B.cpu(), axs=axs[4, :], img_name='idt_B')
+        fig.suptitle(f'ID {self.patient}')
         if use_image_name:
             tag = mode + f'{self.patient}/GAN'
         else:
-            tag = mode + 'GAN'
+            tag = mode + '/GAN'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:

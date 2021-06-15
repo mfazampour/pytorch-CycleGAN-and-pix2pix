@@ -43,12 +43,16 @@ def main():
     opt.visualizer = visualizer
     total_iters = 0  # the total number of training iterations
 
+    print('visualizer started')
+
     optimize_time = -1
 
     times = []
     opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
     os.makedirs(opt.tensorboard_path, exist_ok=True)
     writer = SummaryWriter(opt.tensorboard_path)
+
+    print('tensorboard started')
 
     for epoch in range(opt.epoch_count,
                        opt.n_epochs + opt.n_epochs_decay + 1):  # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
@@ -97,9 +101,9 @@ def main():
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
 
-            # evaluate model performance every evalutate_freq iterations
-            if total_iters % opt.evalutate_freq == 0:
-                evaulate_model(dataset_val, model, total_iters, writer)
+            # evaluate model performance every evaluation_freq iterations
+            if total_iters % opt.evaluation_freq == 0:
+                evaulate_model(dataset_val, model, total_iters, writer, opt.num_validation_samples)
             iter_data_time = time.time()
 
         if epoch % opt.save_epoch_freq == 0:  # cache our model every <save_epoch_freq> epochs
@@ -125,10 +129,12 @@ def display_results(data, epoch, model, opt, total_iters, visualizer, writer):
         model.compute_landmark_loss()
         model.compute_gt_dice()
     model.train()  # change networks back to train mode
-    model.log_tensorboard(writer, losses, total_iters, save_gif=False)
+    model.log_tensorboard(writer, losses, total_iters, save_gif=False, mode='train')
+    if isinstance(model, Multitask):
+        model.log_mt_tensorboard(model.real_A, model.real_B, model.fake_B, writer, global_step=total_iters, mode='train')
 
 
-def evaulate_model(dataset_val, model, total_iters, writer):
+def evaulate_model(dataset_val, model, total_iters, writer, num_validation_samples):
     print('evaluating model on labeled data')
     losses_total = []
     keys = []
@@ -138,7 +144,7 @@ def evaulate_model(dataset_val, model, total_iters, writer):
     land_beg = []
     for j, (val_data) in enumerate(dataset_val):
         model.eval()  # change networks to eval mode
-        if j > 5:
+        if j > num_validation_samples:
             break
         with torch.no_grad():
             model.set_input(val_data)  # unpack data from data loader
@@ -155,13 +161,15 @@ def evaulate_model(dataset_val, model, total_iters, writer):
                 land_def.append(landmarks_def.item())
                 model.compute_landmark_loss()
                 model.compute_gt_dice()
-            model.log_tensorboard(writer=writer, losses=None, global_step=j, save_gif=False,
-                                  use_image_name=True, mode=f'val-{total_iters}')
+                model.log_mt_tensorboard(model.real_A, model.real_B, model.fake_B, writer=writer,
+                                         global_step=total_iters, use_image_name=False, mode=f'val-{model.patient}')
+            model.log_tensorboard(writer=writer, losses=None, global_step=total_iters, save_gif=False,
+                                  use_image_name=True, mode=f'val-')
         keys = losses.keys()
     for key in keys:
-        loss_aggregate[key] = np.mean([losses[key] for losses in losses_total])
+        loss_aggregate[key] = np.nanmean([losses.get(key, np.NaN) for losses in losses_total])
     for key in loss_aggregate:
-        writer.add_scalar(f'val-{total_iters}-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
+        writer.add_scalar(f'val-losses/{key}', scalar_value=loss_aggregate[key], global_step=total_iters)
 
 
 if __name__ == '__main__':
