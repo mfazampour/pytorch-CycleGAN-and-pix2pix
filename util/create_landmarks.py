@@ -11,30 +11,27 @@ from options.train_options import TrainOptions
 
 #
 def getLandmarks(filename, landmarks_filename):
-    landmark_list = []
-    # for i in range(len(landmarks_filename)):
     reader = sitk.ImageFileReader()
-    #   filename = "/Users/kristinamach/Desktop/Patient_trial_50_05082015_D5427C/mr.mhd"
-    file = open(filename, "r")
-    #  print(filename,flush = True)
-    # landmarks = "/Users/kristinamach/Desktop/Patient_trial_50_05082015_D5427C/mr_pcd.txt"
-    landmarks = open(landmarks_filename, "r")
 
     reader.SetFileName(filename)
     reader.LoadPrivateTagsOn()
     reader.ReadImageInformation()
 
+    landmarks = open(landmarks_filename, "r")
     lm = landmarks.readlines()
+    landmarks.close()
     world_landmark = []
     for x in lm:
         indexes = list(map(float, x.split()))
         indexes = np.append(indexes, [1])
         world_landmark.append(indexes)
 
-    file = file.readlines()
+    file = open(filename, "r")
+    lines = file.readlines()
+    file.close()
 
     metdata = []
-    for x in file:
+    for x in lines:
         if x.split()[0] == "Position" or x.split()[0] == "Orientation":
             metdata.append(x.replace('=', '').split()[1:])
 
