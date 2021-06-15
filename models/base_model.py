@@ -242,14 +242,17 @@ class BaseModel(ABC):
             if isinstance(name, str):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 if self.opt.isTrain and self.opt.pretrained_name is not None:
-                        join_ = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
-                        load_dir = join
+                    join_ = os.path.join(self.opt.load_init_models, self.opt.pretrained_name)
+                    load_dir = join_
                 else:
                     load_dir = self.opt.load_init_models
                 load_path = os.path.join(load_dir, load_filename)
                 net = getattr(self, 'net' + name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
+                if not os.path.isfile(load_path):
+                    print(f'failed to load {name} network. {load_path} does not exits')
+                    continue
                 print('loading the model from %s' % load_path)
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
