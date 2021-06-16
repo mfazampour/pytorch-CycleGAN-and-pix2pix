@@ -2,6 +2,8 @@
 tags:
   - Mutltitask
   - HPTuning
+  - LinearDecreasingAdvLess
+  - AugmentSegmentationInput
 
 version: 1
 
@@ -10,7 +12,7 @@ build:
     - "apt update"
     - "apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git"
     - "pip install -r requirements.txt"
-  image: "pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime"
+  image: pytorch/pytorch:1.7.0-cuda11.0-cudnn8-runtime
 
 environment:
   node_selector:
@@ -58,7 +60,7 @@ params:
   netSeg: unet_small
   ngf: 64
   output_nc: 1
-  print_freq: 200
+  print_freq: 20
 
 run:
   cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -92,5 +94,6 @@ run:
                                     --netReg {{ netReg }} \
                                     --netSeg {{ netSeg }} \
                                     --nce_layers "0,1,2,3" \
-                                    --reg_idt_B
+                                    --reg_idt_B \
+                                    --augment_segmentation
 #	--use_rigid_branch \\
