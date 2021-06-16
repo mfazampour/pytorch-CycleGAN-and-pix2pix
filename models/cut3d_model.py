@@ -166,8 +166,6 @@ class CUT3dModel(BaseModel):
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.patient = input['Patient']
-        self.landmarks_A = input['A_landmark'].to(self.device)
-        self.landmarks_B = input['B_landmark'].to(self.device)
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
@@ -195,12 +193,11 @@ class CUT3dModel(BaseModel):
         """Calculate GAN loss for the discriminator"""
         fake = self.fake_B.detach()
         # Fake; stop backprop to the generator by detaching fake_B
-        pred_fake = self.netD(fake)
+        pred_fake = self.netD(self.fake_B.detach())
         self.loss_D_fake = self.criterionGAN_syn(pred_fake, False).mean()
         # Real
         self.pred_real = self.netD(self.real_B)
-        loss_D_real = self.criterionGAN_syn(self.pred_real, True)
-        self.loss_D_real = loss_D_real.mean()
+        self.loss_D_real = self.criterionGAN_syn(self.pred_real, True).mean()
 
         # combine loss and calculate gradients
         self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
