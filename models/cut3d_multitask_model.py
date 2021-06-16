@@ -121,5 +121,5 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
         if epoch >= self.opt.epochs_before_reg:
-            self.first_phase_coeff = 0
+            self.first_phase_coeff = 1 / (epoch + 1 - self.opt.epochs_before_reg)  # linear reduction of GAN effect on mt
 
