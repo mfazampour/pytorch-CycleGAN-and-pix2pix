@@ -228,13 +228,17 @@ class Multitask:
         self.mask_A_deformed = self.transformer_label(self.mask_A, self.dvf.detach())
 
         if self.opt.augment_segmentation:
-            self.augmented_B, affine = affine_transform.apply_random_affine(
-                torch.cat([fake_B, fixed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
-            self.augmented_mask, _ = affine_transform.apply_random_affine(
-                torch.cat([self.mask_A, self.mask_A_deformed], dim=0), affine=affine, batchsize=2)
-            seg_ = self.netSeg(self.augmented_B)
-            self.seg_fake_B = seg_[:self.opt.batch_size, ...]
-            self.seg_B = seg_[self.opt.batch_size:, ...]
+            self.augmented_mask, affine = affine_transform.apply_random_affine(
+                torch.cat([self.mask_A, self.mask_A_deformed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
+            # self.augmented_B, affine = affine_transform.apply_random_affine(
+            #     torch.cat([fake_B, fixed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
+            # self.augmented_mask, _ = affine_transform.apply_random_affine(
+            #     torch.cat([self.mask_A, self.mask_A_deformed], dim=0), affine=affine, batchsize=2)
+            self.augmented_fake, _ = affine_transform.apply_random_affine(fake_B, affine=affine[self.opt.batch_size:, ...])
+            self.augmented_real, _ = affine_transform.apply_random_affine(fixed, affine=affine[:self.opt.batch_size, ...])
+            # seg_ = self.netSeg(self.augmented_B)
+            self.seg_B = self.netSeg(self.augmented_real)
+            self.seg_fake_B = self.netSeg(self.augmented_fake)
         else:
             self.seg_B = self.netSeg(fixed)
             self.seg_fake_B = self.netSeg(fake_B)
@@ -359,10 +363,14 @@ class Multitask:
         self.loss_DefReg += self.loss_DefRgl
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
-        self.loss_Seg_real = self.criterionSeg(self.seg_B, self.mask_A_deformed)
+        if self.opt.augment_segmentation:
+            seg_B = self.netSeg(self.augmented_real)
+        else:
+            seg_B = self.netSeg(fixed)
+        self.loss_Seg_real = self.criterionSeg(seg_B, self.mask_A_deformed)
 
         if self.opt.augment_segmentation:
-            seg_fake_B = self.netSeg(self.augmented_B[:self.opt.batch_size, ...].detach())
+            seg_fake_B = self.netSeg(self.augmented_fake.detach())
         else:
             seg_fake_B = self.netSeg(fake_B.detach())
         self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
@@ -389,8 +397,8 @@ class Multitask:
         self.diff_A = reg_A - self.deformed_B
         self.diff_B = reg_B - self.deformed_B
         self.diff_orig = real_B - self.deformed_B
-        self.seg_fake_B = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
-        self.seg_B = torch.argmax(self.seg_B, dim=1, keepdim=True)
+        seg_fake_B_img = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
+        seg_B_img = torch.argmax(self.seg_B, dim=1, keepdim=True)
 
         n_c = shape[2]
 
@@ -420,18 +428,18 @@ class Multitask:
         n_c = shape[2]
         # average over channel to get the real and fake image
         self.mask_A_center_sag = self.mask_A[:, :, int(n_c / 2), ...]
-        self.seg_A_center_sag = self.seg_fake_B[:, :, int(n_c / 2), ...]
-        self.seg_B_center_sag = self.seg_B[:, :, int(n_c / 2), ...]
+        self.seg_A_center_sag = seg_fake_B_img[:, :, int(n_c / 2), ...]
+        self.seg_B_center_sag = seg_B_img[:, :, int(n_c / 2), ...]
 
         n_c = shape[3]
         self.mask_A_center_cor = self.mask_A[:, :, :, int(n_c / 2), ...]
-        self.seg_A_center_cor = self.seg_fake_B[:, :, :, int(n_c / 2), ...]
-        self.seg_B_center_cor = self.seg_B[:, :, :, int(n_c / 2), ...]
+        self.seg_A_center_cor = seg_fake_B_img[:, :, :, int(n_c / 2), ...]
+        self.seg_B_center_cor = seg_B_img[:, :, :, int(n_c / 2), ...]
 
         n_c = shape[4]
         self.mask_A_center_axi = self.mask_A[..., int(n_c / 2)]
-        self.seg_A_center_axi = self.seg_fake_B[..., int(n_c / 2)]
-        self.seg_B_center_axi = self.seg_B[..., int(n_c / 2)]
+        self.seg_A_center_axi = seg_fake_B_img[..., int(n_c / 2)]
+        self.seg_B_center_axi = seg_B_img[..., int(n_c / 2)]
 
         n_c = int(shape[2] / 2)
         self.dvf_center_sag = self.dvf[:, :, n_c, ...]
@@ -531,10 +539,11 @@ class Multitask:
             tensorboard.fill_subplots(seg_fake_B.cpu(), axs=axs[1, :], img_name='Seg fake US')
         idx = 2
         if self.opt.augment_segmentation:
-            tensorboard.fill_subplots(self.augmented_B[1:, ...].detach().cpu(), axs=axs[idx, :], img_name='Real US augmented')
+            tensorboard.fill_subplots(self.augmented_real.detach().cpu(), axs=axs[idx, :], img_name='Real US augmented')
             idx += 1
         overlay = fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.seg_fake_B.detach()
+        seg_fake_B_img = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
+        overlay[:, 0:1, ...] += 0.5 * seg_fake_B_img.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Fake mask overlay', cmap=None)
@@ -548,11 +557,12 @@ class Multitask:
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Def. mask overlay', cmap=None)
         idx += 1
-        tensorboard.fill_subplots(self.seg_B.detach().cpu(), axs=axs[idx, :], img_name='Seg. US')
+        seg_B_img = torch.argmax(self.seg_B, dim=1, keepdim=True)
+        tensorboard.fill_subplots(seg_B_img.detach().cpu(), axs=axs[idx, :], img_name='Seg. US')
         idx += 1
 
         overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.seg_B.detach()
+        overlay[:, 0:1, ...] += 0.5 * seg_B_img.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Seg. US overlay', cmap=None)
