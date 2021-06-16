@@ -22,3 +22,4 @@ scikit-image
 h5py
 scipy
 nibabel
+rising
