@@ -1,4 +1,5 @@
 import time
+import datetime
 import os
 
 import torch
@@ -48,7 +49,8 @@ def main():
     optimize_time = -1
 
     times = []
-    opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name)
+    opt.tensorboard_path = os.path.join(opt.checkpoints_dir, opt.name + '/',
+                                        datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
     os.makedirs(opt.tensorboard_path, exist_ok=True)
     writer = SummaryWriter(opt.tensorboard_path)
 
