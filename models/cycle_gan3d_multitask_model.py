@@ -105,8 +105,8 @@ class CycleGan3dMultiTaskModel(CycleGAN3dModel, Multitask):
 
         self.loss_G_GAN = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
 
-        self.loss_G = self.loss_G_GAN * self.first_phase_coeff
-        self.loss_G = self.mt_g_backward(self.fake_B, self.loss_G)
+        self.loss_G = self.loss_G_GAN
+        self.loss_G += self.mt_g_backward(self.fake_B)
 
         if torch.is_grad_enabled():
             self.loss_G.backward()

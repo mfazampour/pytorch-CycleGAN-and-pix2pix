@@ -117,10 +117,10 @@ class Pix2PixHDMultitaskModel(Pix2PixHDModel, Multitask):
         if not self.opt.no_ganFeat_loss:
             self.loss_pix2pix += self.loss_G_GAN_Feat
 
-        self.loss_G = self.loss_pix2pix * self.first_phase_coeff
+        self.loss_G = self.loss_pix2pix
         ########   END pix2pix HD    ########
 
-        self.loss_G = self.mt_g_backward(self.fake_B, self.loss_G)
+        self.loss_G += self.mt_g_backward(self.fake_B)
 
         if torch.is_grad_enabled():
             self.loss_G.backward()

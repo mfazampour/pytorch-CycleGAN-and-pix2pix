@@ -45,6 +45,8 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
 
         self.add_visdom_names(self.loss_names, self.visual_names)
 
+        self.loss_names.append('G_adv')
+
         self.loss_functions = ['backward_G', 'compute_D_loss']
 
         self.add_networks(opt, self.model_names, self.loss_functions, self.gpu_ids)
@@ -58,7 +60,7 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
         self.set_mt_input(input, real_B=self.real_B, shape=self.real_B.shape,
                           dtype=self.real_B.dtype, device=self.real_B.device)
         self.init_loss_tensors()
-        self.loss_G_NCE = torch.tensor([0.0])
+        self.loss_G_adv = torch.tensor([0.0])
 
     def forward(self):
         super().forward()
@@ -67,9 +69,9 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
 
     def backward_G(self):
         """Calculate GAN and L1 loss for the generator"""
-        self.loss_G_NCE = self.compute_G_loss()
-        self.loss_G = self.loss_G_NCE * self.first_phase_coeff
-        self.loss_G = self.mt_g_backward(self.fake_B, self.loss_G)
+        self.loss_G_adv = self.compute_G_loss()
+        self.loss_G = self.loss_G_adv
+        self.loss_G += self.mt_g_backward(self.fake_B)
 
         if torch.is_grad_enabled():
             self.loss_G.backward()
@@ -120,6 +122,5 @@ class CUT3DMultiTaskModel(CUT3dModel, Multitask):
 
     def update_learning_rate(self, epoch=0):
         super().update_learning_rate(epoch=epoch)
-        if epoch >= self.opt.epochs_before_reg:
-            self.first_phase_coeff = 1 / (epoch + 1 - self.opt.epochs_before_reg)  # linear reduction of GAN effect on mt
+        self.set_coeff_multitask_loss(epoch)
 

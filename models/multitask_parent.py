@@ -305,7 +305,7 @@ class Multitask:
         self.loss_landmarks_rigid_diff = self.loss_landmarks_beginning - self.loss_landmarks_rigid
         self.loss_landmarks_def_diff = self.loss_landmarks_beginning - self.loss_landmarks_def
 
-    def mt_g_backward(self, fake_B, loss_G):
+    def mt_g_backward(self, fake_B):
         # rigid registration
         loss_G_Reg = self.criterionRigidReg(self.reg_A_params, self.gt_vector) * self.opt.lambda_Reg
 
@@ -319,8 +319,8 @@ class Multitask:
         loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
 
         # combine loss and calculate gradients
-        loss_G += loss_DefReg_fake * (1 - self.first_phase_coeff) + \
-                      loss_G_Seg * (1 - self.first_phase_coeff)
+        loss_G = loss_DefReg_fake * (1 - self.first_phase_coeff) + \
+                  loss_G_Seg * (1 - self.first_phase_coeff)
 
         if self.opt.use_rigid_branch:
             loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
@@ -605,3 +605,7 @@ class Multitask:
 
     def get_current_landmark_distances(self):
         return self.loss_landmarks_beginning , self.loss_landmarks_rigid, self.loss_landmarks_def
+
+    def set_coeff_multitask_loss(self, epoch):
+        if epoch >= self.opt.epochs_before_reg:
+            self.first_phase_coeff = 1 / (epoch + 1 - self.opt.epochs_before_reg)

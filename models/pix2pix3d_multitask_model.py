@@ -89,8 +89,8 @@ class Pix2Pix3dMultiTaskModel(Pix2Pix3dModel, Multitask):
         # Second, G(A) = B
         self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
 
-        self.loss_G = (self.loss_G_GAN + self.loss_G_L1) * self.first_phase_coeff
-        self.loss_G = self.mt_g_backward(self.fake_B, self.loss_G)
+        self.loss_G = (self.loss_G_GAN + self.loss_G_L1)
+        self.loss_G += self.mt_g_backward(self.fake_B)
 
         if torch.is_grad_enabled():
             self.loss_G.backward()
