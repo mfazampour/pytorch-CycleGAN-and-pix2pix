@@ -365,15 +365,19 @@ class Multitask:
 
         if self.opt.augment_segmentation:
             seg_B = self.netSeg(self.augmented_real)
+            mask = self.augmented_mask[self.opt.batch_size:, ...]
         else:
             seg_B = self.netSeg(fixed)
-        self.loss_Seg_real = self.criterionSeg(seg_B, self.mask_A_deformed)
+            mask = self.mask_A_deformed
+        self.loss_Seg_real = self.criterionSeg(seg_B, mask)
 
         if self.opt.augment_segmentation:
             seg_fake_B = self.netSeg(self.augmented_fake.detach())
+            mask = self.augmented_mask[:self.opt.batch_size, ...].detach()
         else:
             seg_fake_B = self.netSeg(fake_B.detach())
-        self.loss_Seg_fake = self.criterionSeg(seg_fake_B, self.mask_A)
+            mask = self.mask_A
+        self.loss_Seg_fake = self.criterionSeg(seg_fake_B, mask)
 
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
         # self.loss_DefReg.backward()
@@ -527,10 +531,7 @@ class Multitask:
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
-        if self.opt.augment_segmentation:
-            axs, fig = tensorboard.init_figure(3, 8)
-        else:
-            axs, fig = tensorboard.init_figure(3, 7)
+        axs, fig = tensorboard.init_figure(3, 7)
         tensorboard.set_axs_attribute(axs)
         tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
         with torch.no_grad():
@@ -539,9 +540,10 @@ class Multitask:
             tensorboard.fill_subplots(seg_fake_B.cpu(), axs=axs[1, :], img_name='Seg fake US')
         idx = 2
         if self.opt.augment_segmentation:
-            tensorboard.fill_subplots(self.augmented_real.detach().cpu(), axs=axs[idx, :], img_name='Real US augmented')
-            idx += 1
-        overlay = fake_B.detach().repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+            img = self.augmented_fake.detach()
+        else:
+            img = fake_B.detach()
+        overlay = img.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         seg_fake_B_img = torch.argmax(self.seg_fake_B, dim=1, keepdim=True)
         overlay[:, 0:1, ...] += 0.5 * seg_fake_B_img.detach()
         overlay *= 0.8
@@ -551,17 +553,24 @@ class Multitask:
         tensorboard.fill_subplots(self.mask_A_deformed.detach().cpu(), axs=axs[idx, :], img_name='Deformed mask')
         idx += 1
 
-        overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
-        overlay[:, 0:1, ...] += 0.5 * self.mask_A_deformed.detach()
+        if self.opt.augment_segmentation:
+            img = self.augmented_real.detach()
+            mask = self.augmented_mask[self.opt.batch_size:, ...].detach()
+        else:
+            img = real_B.detach()
+            mask = self.mask_A_deformed.detach()
+        overlay = img.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay[:, 0:1, ...] += 0.5 * mask
         overlay *= 0.8
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Def. mask overlay', cmap=None)
         idx += 1
+
         seg_B_img = torch.argmax(self.seg_B, dim=1, keepdim=True)
         tensorboard.fill_subplots(seg_B_img.detach().cpu(), axs=axs[idx, :], img_name='Seg. US')
         idx += 1
 
-        overlay = real_B.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
+        overlay = img.repeat(1, 3, 1, 1, 1) * 0.5 + 0.5
         overlay[:, 0:1, ...] += 0.5 * seg_B_img.detach()
         overlay *= 0.8
         overlay[overlay > 1] = 1
