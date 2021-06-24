@@ -4,6 +4,9 @@ tags:
   - HPTuning
   - LinearDecreasingAdvLess
   - AugmentSegmentationInput
+  - IncreasedCUTLR
+  - BigLambdaSeg
+  - IncreasedRegWeight
 
 version: 1
 
@@ -39,13 +42,12 @@ params:
   display_freq: 50
   display_id: -1
   epoch: latest
-  epoch_count: 0
   epochs_before_reg: 0
   input_nc: 1
   load_init_models: /data/Prostate_Reg_KM/multitask/cut3d/fixed/
-  #/data/Prostate_Reg_KM/multitask/cut3d/50577/experiment_name
+#  /outputs/farid/Pro_Reg_GAN/experiments/64159/experiment_name/#
   load_mask: true
-  lr: 0.000001
+  lr: 0.00001
   lr_Def: 0.0001
   lr_Reg: 0.00001
   lr_Seg: 0.00001
@@ -60,7 +62,9 @@ params:
   netSeg: unet_small
   ngf: 64
   output_nc: 1
-  print_freq: 20
+  print_freq: 40
+  lambda_Seg: 10
+  grad_loss_weight: 10
 
 run:
   cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -78,7 +82,6 @@ run:
                                     --display_freq {{ display_freq }} \
                                     --print_freq {{ print_freq }} \
                                     --lr_decay_iters {{ lr_decay_iters }} \
-                                    --epoch_count {{ epoch_count }} \
                                     --n_epochs {{ n_epochs }} \
                                     --n_epochs_decay {{ n_epochs_decay }} \
                                     --netG {{ netG }} \
@@ -95,5 +98,8 @@ run:
                                     --netSeg {{ netSeg }} \
                                     --nce_layers "0,1,2,3" \
                                     --reg_idt_B \
-                                    --augment_segmentation
+                                    --augment_segmentation \
+                                    --lambda_Seg {{ lambda_Seg }} \
+                                    --save_volume \
+                                    --grad_loss_weight {{ grad_loss_weight }}
 #	--use_rigid_branch \\

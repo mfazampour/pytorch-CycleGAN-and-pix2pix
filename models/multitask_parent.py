@@ -18,7 +18,8 @@ os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
 
 from monai.metrics import compute_meandice
-
+from monai.metrics import compute_hausdorff_distance
+from monai.metrics import compute_average_surface_distance
 
 class Multitask:
 
@@ -51,13 +52,14 @@ class Multitask:
             parser.add_argument('--lr_Reg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--lambda_Seg', type=float, default=0.5, help='weight for the segmentation loss')
             parser.add_argument('--lr_Seg', type=float, default=0.0001, help='learning rate for the reg. network opt.')
-            parser.add_argument('--lambda_Def', type=float, default=1.0, help='weight for the segmentation loss')
+            parser.add_argument('--lambda_Def', type=float, default=10.0, help='weight for the def. reg. network loss')
             parser.add_argument('--lr_Def', type=float, default=0.0001, help='learning rate for the reg. network opt.')
             parser.add_argument('--vxm_iteration_steps', type=int, default=5, help='number of steps to train the registration network for each simulated US')
             parser.add_argument('--similarity', type=str, default='NCC', choices=['NCC', 'MIND'], help='type of the similarity used for training voxelmorph')
             parser.add_argument('--epochs_before_reg', type=int, default=0, help='number of epochs to train the network before reg loss is used')
             parser.add_argument('--image-loss', default='mse', help='image reconstruction loss - can be mse or ncc (default: mse)')
             parser.add_argument('--augment_segmentation', action='store_true', help='Augment data before segmenting')
+            parser.add_argument('--grad_loss_weight', type=float, default=1.0, help='weight of gradient loss (lambda) (default: 1.0)')
         return parser
 
 
@@ -73,7 +75,7 @@ class Multitask:
         else:  # during test time, only load G
             model_names += ['RigidReg', 'DefReg', 'Seg']
 
-        loss_functions += ['backward_RigidReg', 'backward_DefReg_Seg']
+        loss_functions += ['backward_RigidReg', 'backward_DefReg_Seg', 'compute_gt_dice', 'compute_landmark_loss']
 
         # We are using DenseNet for rigid registration -- actually DenseNet didn't provide any performance improvement
         # TODO change this to obelisk net
@@ -113,9 +115,11 @@ class Multitask:
         # specify the training losses you want to print out. The training/test scripts will call
         # <BaseModel.get_current_losses>
         loss_names += ['RigidReg_fake', 'RigidReg_real']
-        loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake']
+        loss_names += ['DefReg_real', 'DefReg_fake', 'Seg_real', 'Seg_fake', 'DefRgl']
         loss_names += ['landmarks']
         loss_names += ['diff_dice', 'moving_dice', 'warped_dice']
+        loss_names += ['warped_HD', 'moving_HD', 'diff_HD']
+        loss_names += ['warped_ASD', 'moving_ASD', 'diff_ASD']
         # specify the images you want to save/display. The training/test scripts will call
         # <BaseModel.get_current_visuals>
 
@@ -211,6 +215,11 @@ class Multitask:
         self.loss_landmarks_deformed= torch.tensor([0.0])
         self.loss_landmarks = torch.tensor([0.0])
 
+        self.loss_warped_dice, self.loss_moving_dice, self.loss_diff_dice= None, None, None
+        self.loss_warped_HD, self.loss_moving_HD, self.loss_diff_HD = None, None, None
+
+        self.loss_warped_ASD, self.loss_moving_ASD, self.loss_diff_ASD = None, None, None
+
     def mt_forward(self, fake_B, real_B, fixed, real_A):
         self.reg_A_params = self.netRigidReg(torch.cat([fake_B, self.deformed_B], dim=1))
         self.reg_B_params = self.netRigidReg(torch.cat([real_B, self.deformed_B], dim=1))
@@ -229,7 +238,8 @@ class Multitask:
 
         if self.opt.augment_segmentation:
             self.augmented_mask, affine = affine_transform.apply_random_affine(
-                torch.cat([self.mask_A, self.mask_A_deformed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
+                torch.cat([self.mask_A, self.mask_A_deformed], dim=0), rotation=0.5,
+                translation=0.1, batchsize=2, interp_mode='nearest')
             # self.augmented_B, affine = affine_transform.apply_random_affine(
             #     torch.cat([fake_B, fixed], dim=0), rotation=0.5, translation=0.1, batchsize=2)
             # self.augmented_mask, _ = affine_transform.apply_random_affine(
@@ -243,8 +253,7 @@ class Multitask:
             self.seg_B = self.netSeg(fixed)
             self.seg_fake_B = self.netSeg(fake_B)
         self.Landmark_A_dvf = self.transformer_label(self.landmarks_A, self.dvf.detach())
-        self.compute_gt_dice()
-        self.compute_landmark_loss()
+
 
         self.fake_B = fake_B
         self.fixed = fixed
@@ -274,12 +283,16 @@ class Multitask:
 
             self.loss_warped_dice = compute_meandice(one_hot_deformed, one_hot_fixed, include_background=False)
             self.loss_moving_dice = compute_meandice(one_hot_moving, one_hot_fixed, include_background=False)
-            self.loss_diff_dice = self.loss_warped_dice - self.loss_moving_dice
+            self.loss_diff_dice = 100 * (self.loss_warped_dice - self.loss_moving_dice)/self.loss_moving_dice
 
-        else:
-            self.loss_warped_dice = None
-            self.loss_moving_dice = None
-            self.loss_diff_dice = None
+            self.loss_warped_HD = compute_hausdorff_distance(one_hot_deformed, one_hot_fixed, percentile=95)
+            self.loss_moving_HD = compute_hausdorff_distance(one_hot_moving, one_hot_fixed, percentile=95)
+            self.loss_diff_HD = 100 * (self.loss_warped_HD - self.loss_moving_HD)/self.loss_moving_HD
+
+            self.loss_warped_ASD = compute_average_surface_distance(one_hot_deformed, one_hot_fixed)
+            self.loss_moving_ASD = compute_average_surface_distance(one_hot_moving, one_hot_fixed)
+            self.loss_diff_ASD = 100 * (self.loss_warped_ASD - self.loss_moving_ASD) / self.loss_moving_ASD
+
 
     def compute_landmark_loss(self):
 
@@ -319,12 +332,12 @@ class Multitask:
         loss_G_Seg = self.criterionSeg(self.seg_fake_B, self.mask_A) * self.opt.lambda_Seg
 
         # combine loss and calculate gradients
-        loss_G = loss_DefReg_fake * (1 - self.first_phase_coeff) + \
+        loss = loss_DefReg_fake * (1 - self.first_phase_coeff) + \
                   loss_G_Seg * (1 - self.first_phase_coeff)
 
         if self.opt.use_rigid_branch:
-            loss_G += loss_G_Reg * (1 - self.first_phase_coeff)
-        return loss_G
+            loss += loss_G_Reg * (1 - self.first_phase_coeff)
+        return loss
 
     def backward_RigidReg(self):
         """
@@ -360,7 +373,7 @@ class Multitask:
         else:
             self.loss_DefReg_fake = torch.tensor([0.0])
         self.loss_DefRgl = self.criterionDefRgl(dvf, None)
-        self.loss_DefReg += self.loss_DefRgl
+        self.loss_DefReg += self.loss_DefRgl * self.opt.grad_loss_weight
         self.loss_DefReg *= (1 - self.first_phase_coeff)
 
         if self.opt.augment_segmentation:
@@ -382,7 +395,7 @@ class Multitask:
         self.loss_Seg = (self.loss_Seg_real + self.loss_Seg_fake) * (1 - self.first_phase_coeff)
         # self.loss_DefReg.backward()
         if torch.is_grad_enabled():
-            (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg * self.opt.lambda_Seg).backward()
+            (self.loss_DefReg * self.opt.lambda_Def + self.loss_Seg).backward()
 
 
     def get_transformed_images(self, real_B) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -531,9 +544,11 @@ class Multitask:
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
     def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
-        axs, fig = tensorboard.init_figure(3, 7)
+        n_rows = 8 if self.mask_B is not None else 7
+        axs, fig = tensorboard.init_figure(3, n_rows)
         tensorboard.set_axs_attribute(axs)
-        tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name='Mask MR')
+        prostate_vol = self.mask_A.sum().item()/1e3
+        tensorboard.fill_subplots(self.mask_A.cpu(), axs=axs[0, :], img_name=f'Mask MR\nVolume: {prostate_vol:0.1f}')
         with torch.no_grad():
             seg_fake_B = self.netSeg(self.fake_B.detach())
             seg_fake_B = torch.argmax(seg_fake_B, dim=1, keepdim=True)
@@ -575,6 +590,13 @@ class Multitask:
         overlay *= 0.8
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :], img_name='Seg. US overlay', cmap=None)
+        idx += 1
+
+        if self.mask_B is not None:
+            prostate_vol = self.mask_B.sum().item() / 1e3
+            tensorboard.fill_subplots(self.mask_B.cpu(), axs=axs[idx, :], img_name=f'Mask US\nVolume: {prostate_vol:0.1f}')
+            idx += 1
+
         if use_image_name:
             tag = mode + f'{self.patient}/Segmentation'
         else:
