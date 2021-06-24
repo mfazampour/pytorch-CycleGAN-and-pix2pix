@@ -27,7 +27,6 @@ params:
   display_freq: 50
   display_id: -1
   epoch: latest
-  epoch_count: 0
   input_nc: 1
   load_mask: true
   lr: 0.0002
@@ -52,8 +51,7 @@ run:
 	--lr_policy={{ lr_policy }} \\ 
 	--display_freq={{ display_freq }} \\ 
 	--print_freq {{ print_freq }} 
-	--epoch_count={{ epoch_count }} \\ 
-	--n_epochs={{ n_epochs }} \\ 
+	--n_epochs={{ n_epochs }} \\
 	--netG={{ netG }} \\ 
 	--netD={{netD}} \\
     --gan_mode={{gan_mode}}\\

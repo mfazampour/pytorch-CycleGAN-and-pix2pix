@@ -36,7 +36,6 @@ params:
   print_freq: 20
   lr_decay_iters: 1
   batch_size: 1
-  epoch_count: 0
   netG: unet_small
   netD: basic
   model: pix2pix3d_multitask
@@ -64,7 +63,6 @@ run:
                                     --display_freq={{ display_freq }} \
                                     --print_freq {{ print_freq }}
                                     --lr_decay_iters {{ lr_decay_iters }} \
-                                    --epoch_count={{ epoch_count }} \
                                     --n_epochs={{ n_epochs }} \
                                     --netG={{ netG }} \ 
                                     --netD={{ netD }} \ 
