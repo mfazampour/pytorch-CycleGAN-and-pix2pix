@@ -273,9 +273,9 @@ class BaseModel(ABC):
                         if new_params[key].shape == pre_params[key].shape:  # replace the values when sizes match
                             new_params[key] = pre_params[key]
                         else:
-                            print(f'shape does not match for {key} in model {name}')
+                            print(f'shape does not match for {key} in model {name}, {new_params[key].shape} vs {pre_params[key].shape}')
                     else:
-                        print(f'{key} from saved model does not exist in model {name}')
+                        print(f'{key} from new model does not exist in model {name}')
 
                 net.load_state_dict(new_params)
 

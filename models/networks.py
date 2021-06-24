@@ -20,7 +20,7 @@ from voxelmorph import voxelmorph as vxm
 # Helper Functions
 ###############################################################################
 
-#
+
 def get_filter(filt_size=3):
     if(filt_size == 1):
         a = np.array([1., ])
@@ -487,7 +487,7 @@ class GANLoss(nn.Module):
         """ Initialize the GANLoss class.
 
         Parameters:
-            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgangp.
+            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgan-gp.
             target_real_label (bool) - - label for a real image
             target_fake_label (bool) - - label of a fake image
 
@@ -502,7 +502,7 @@ class GANLoss(nn.Module):
             self.loss = nn.MSELoss()
         elif gan_mode == 'vanilla':
             self.loss = nn.BCEWithLogitsLoss()
-        elif gan_mode in ['wgangp', 'nonsaturating']:
+        elif gan_mode in ['wgan', 'nonsaturating', 'wgan-gp']:
             self.loss = None
         else:
             raise NotImplementedError('gan mode %s not implemented' % gan_mode)
@@ -538,7 +538,7 @@ class GANLoss(nn.Module):
         if self.gan_mode in ['lsgan', 'vanilla']:
             target_tensor = self.get_target_tensor(prediction, target_is_real)
             loss = self.loss(prediction, target_tensor)
-        elif self.gan_mode == 'wgangp':
+        elif self.gan_mode == 'wgan-gp' or self.gan_mode == 'wgan':
             if target_is_real:
                 loss = -prediction.mean()
             else:
@@ -886,6 +886,7 @@ class Encoder(nn.Module):
         return outputs_mean
 
 
+
 class E_adaIN(nn.Module):
     def __init__(self, input_nc, output_nc=1, nef=64, n_layers=4,
                  norm=None, nl_layer=None, vae=False):
@@ -1182,6 +1183,7 @@ class LayerNorm(nn.Module):
             shape = [1, -1] + [1] * (x.dim() - 2)
             x = x * self.gamma.view(*shape) + self.beta.view(*shape)
         return x
+
 
 class ResnetGenerator(nn.Module):
     """Resnet-based generator that consists of Resnet blocks between a few downsampling/upsampling operations.
