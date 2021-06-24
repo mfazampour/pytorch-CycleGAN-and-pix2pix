@@ -219,8 +219,6 @@ class CUTHD3dModel(BaseModel):
         self.mask_A = input['A_mask'].to(self.device).type(self.real_A.dtype)
 
         self.patient = input['Patient']
-        self.landmarks_A = input['A_landmark'].to(self.device)
-        self.landmarks_B = input['B_landmark'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
 

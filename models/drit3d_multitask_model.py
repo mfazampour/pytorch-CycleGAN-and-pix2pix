@@ -208,8 +208,6 @@ class DRIT3DMultiTaskModel(DRIT3dModel):
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
         self.patient = input['Patient']
-        self.landmarks_A = input['A_landmark'].to(self.device).unsqueeze(dim=0)
-        self.landmarks_B = input['B_landmark'].to(self.device).unsqueeze(dim=0)
         affine, self.gt_vector = affine_transform.create_random_affine(self.real_B.shape[0],
                                                                        self.real_B.shape[-3:],
                                                                        self.real_B.dtype,
