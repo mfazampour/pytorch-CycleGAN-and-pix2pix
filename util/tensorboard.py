@@ -26,13 +26,15 @@ def fmt(x, pos):
 
 
 def fill_subplots(img: torch.Tensor, axs: List[plt.Axes], img_name='', fontsize=10, cmap='gray',
-                  fig: plt.Figure=None, show_colorbar=False, normalize=True):
+                  fig: plt.Figure=None, show_colorbar=False, normalize=True, permute=True):
     if cmap == 'gray' and normalize:  # map image to 0...1
         img = (img - img.min())/(img.max() - img.min())
     elif cmap is None:  # cliping data to 0...255
         img[img < 0] = 0
         img[img > 255] = 255
 
+    if permute:
+        img = img.permute((*range(0, len(img.shape)-3), -1, -2, -3)).flip([-3])
     shape = img.shape[-3:]
     img0 = axs[0].imshow(img[0, :, int(shape[0] / 2), :, :].permute(dims=(1, 2, 0)).squeeze().numpy(), cmap=cmap)
     # axs[0].set_title(f'{img_name} central slice \n in sagittal view', fontsize=fontsize)
@@ -53,9 +55,10 @@ def fill_subplots(img: torch.Tensor, axs: List[plt.Axes], img_name='', fontsize=
         set_colorbar(img2, axs[2], fig, fontsize)
 
 
-def set_colorbar(img, ax, fig, fontsize):
+def set_colorbar(img, ax: plt.Axes, fig: plt.Figure, fontsize):
     cb = fig.colorbar(img, ax=ax, orientation='horizontal', format=ticker.FuncFormatter(fmt), pad=0.2)
     cb.ax.tick_params(labelsize=fontsize)
+    cb.ax.locator_params(axis='x', nbins=5)
 
 
 def create_figure(fixed: torch.Tensor, moving: torch.Tensor, registered: torch.Tensor, jacob: torch.Tensor,
