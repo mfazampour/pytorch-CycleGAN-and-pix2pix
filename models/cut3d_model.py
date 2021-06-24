@@ -12,6 +12,7 @@ from . import networks3d
 from .patchnce import PatchNCELoss
 import util.util as util
 from util import tensorboard
+from util.image_pool import ImagePool
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 from voxelmorph import voxelmorph as vxm
@@ -51,7 +52,7 @@ class CUT3dModel(BaseModel):
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
 
-        parser.set_defaults(pool_size=0, dataset_mode='volume')  # no image pooling
+        parser.set_defaults(pool_size=10, dataset_mode='volume')  # no image pooling
 
         opt, _ = parser.parse_known_args()
 
@@ -112,6 +113,7 @@ class CUT3dModel(BaseModel):
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
+            self.fake_pool = ImagePool(opt.pool_size)
 
     def data_dependent_initialize(self, data):
         """
@@ -191,9 +193,12 @@ class CUT3dModel(BaseModel):
 
     def compute_D_loss(self):
         """Calculate GAN loss for the discriminator"""
-        fake = self.fake_B.detach()
+        if self.opt.pool_size > 0:
+            fake = self.fake_pool.query(self.fake_B.detach())
+        else:
+            fake = self.fake_B.detach()
         # Fake; stop backprop to the generator by detaching fake_B
-        pred_fake = self.netD(self.fake_B.detach())
+        pred_fake = self.netD(fake)
         self.loss_D_fake = self.criterionGAN_syn(pred_fake, False).mean()
         # Real
         self.pred_real = self.netD(self.real_B)
@@ -205,10 +210,9 @@ class CUT3dModel(BaseModel):
 
     def compute_G_loss(self):
         """Calculate GAN and NCE loss for the generator"""
-        fake = self.fake_B
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fake = self.netD(fake)
+            pred_fake = self.netD(self.fake_B)
             # The adversarial loss for the algorithm to also change the domain
             self.loss_G_GAN = self.criterionGAN_syn(pred_fake, True).mean() * self.opt.lambda_GAN
         else:

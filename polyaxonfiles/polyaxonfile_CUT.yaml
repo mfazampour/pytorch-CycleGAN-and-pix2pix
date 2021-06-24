@@ -51,7 +51,7 @@ params:
   val_fold: validation
   train_fold: train
   display_id: -1
-
+  pool_size: 10
 
 run:
     cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
@@ -76,5 +76,6 @@ run:
                                     --display_id={{ display_id }} \ 
                                     --val_fold={{ val_fold }} \
                                     --nce_layers "0,1,2,3" \
-                                    --load_mask true
+                                    --load_mask true \
+                                    --pool_size 20
 
