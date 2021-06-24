@@ -175,9 +175,7 @@ class BaseModel(ABC):
         errors_ret = OrderedDict()
         for name in self.loss_names:
             if isinstance(name, str):
-                if getattr(self, 'loss_' + name) is None:
-                    print(f'loss_{name} is None!')
-                else:
+                if getattr(self, 'loss_' + name) is not None:
                     errors_ret[name] = float(getattr(self, 'loss_' + name))  # float(...) works for both scalar tensor and float number
         return errors_ret
 

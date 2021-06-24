@@ -7,6 +7,7 @@ from monai.visualize import img2tensorboard
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
+from util import tensorboard
 from .base_model import BaseModel
 from . import networks
 from . import networks3d
@@ -48,7 +49,7 @@ class DRIT3dOrigModel(BaseModel):
 
         if is_train:
             # discriminator domain
-            parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
+            # parser.add_argument('--n_layers_d', type=int, default=4, help='number of layers of the discriminator')
             parser.add_argument('--n_scale', type=int, default=3, help='number of scales of the discriminator')
             parser.add_argument('--norm_d', type=str, default='in', help='norm layer of discriminator')
 
@@ -115,13 +116,13 @@ class DRIT3dOrigModel(BaseModel):
 
         if self.isTrain:
             # opt should have n_scale_d if multiscale
-            self.netDis_A = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+            self.netDis_A = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
-            self.netDis_B = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+            self.netDis_B = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
-            self.netDis_A2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+            self.netDis_A2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
-            self.netDis_B2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_d, opt.norm_d,
+            self.netDis_B2 = networks3d.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.norm_d,
                                                 opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids, opt=opt)
             self.netDis_cont = networks3d.define_D(opt.output_nc_cont, opt.ndcf, opt.netD_cont, opt.n_layers_d_cont,
                                                    opt.norm_d_cont, opt.init_type, opt.init_gain, gpu_ids=self.gpu_ids)
@@ -420,7 +421,7 @@ class DRIT3dOrigModel(BaseModel):
         return encoding_loss
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
-                        save_gif=True, use_image_name=False):
+                        save_gif=True, use_image_name=False, mode=''):
         volumes = OrderedDict(mr_real=self.real_a_encoded[0:1].cpu(),
                               mr_content=self.fake_a_random[0:1].cpu(),
                               mr_fake=self.fake_a_encoded[0:1].cpu(),
@@ -432,11 +433,12 @@ class DRIT3dOrigModel(BaseModel):
         axs, fig = vxm.torch.utils.init_figure(3, len(volumes.keys()))
         vxm.torch.utils.set_axs_attribute(axs)
         for i, (key) in enumerate(volumes):
-            vxm.torch.utils.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
+            tensorboard.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
+        fig.suptitle(f'ID {self.patient}')
         if use_image_name:
-            tag = f'{self.patient[0]}/DRIT'
+            tag = mode + f'{self.patient}/GAN'
         else:
-            tag = 'DRIT'
+            tag = mode + '/GAN'
         writer.add_figure(tag=tag, figure=fig, global_step=global_step)
 
         if losses is not None:

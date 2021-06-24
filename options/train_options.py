@@ -50,8 +50,8 @@ class TrainOptions(BaseOptions):
                                  help='# of iter to linearly decay learning rate to zero')
         # for discriminators
         parser.add_argument('--num_D', type=int, default=3, help='number of discriminators to use')
-        parser.add_argument('--n_layers_D', type=int, default=3, help='only used if which_model_netD==n_layers')
-        parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in first conv layer')
+        # parser.add_argument('--n_layers_D', type=int, default=3, help='only used if which_model_netD==n_layers')
+        # parser.add_argument('--ndf', type=int, default=64, help='# of discrim filters in first conv layer')
         parser.add_argument('--lambda_feat', type=float, default=10.0, help='weight for feature matching loss')
         parser.add_argument('--no_ganFeat_loss', action='store_true',
                                  help='if specified, do *not* use discriminator feature matching loss')
