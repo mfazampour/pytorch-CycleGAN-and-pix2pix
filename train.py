@@ -5,11 +5,15 @@ import os
 import torch
 import numpy as np
 import csv
+from torch.utils.tensorboard import SummaryWriter
+import SimpleITK as sitk
+os.environ["TORCHIO_HIDE_CITATION_PROMPT"] = str(1)
+import torchio
+
 from options.train_options import TrainOptions
 from data import create_dataset
-from models import create_model
+from models import create_model, BaseModel
 from util.visualizer import Visualizer
-from torch.utils.tensorboard import SummaryWriter
 from models.multitask_parent import Multitask
 
 def main():
@@ -65,7 +69,6 @@ def main():
 
         dataset.set_epoch(epoch)
         for i, data in enumerate(dataset):  # inner loop within one epoch
-
             iter_start_time = time.time()  # timer for computation per iteration
             if total_iters % opt.print_freq == 0:
                 t_data = iter_start_time - iter_data_time
@@ -80,6 +83,12 @@ def main():
                 model.data_dependent_initialize(data)
                 model.setup(opt)  # regular setup: load and print networks; create schedulers
                 model.parallelize()
+
+            # evaluate model performance every evaluation_freq iterations
+            if total_iters % opt.evaluation_freq == 1:
+                evaulate_model(dataset_val, model, total_iters, writer, opt.num_validation_samples, opt.save_volume, opt.checkpoints_dir)
+            iter_data_time = time.time()
+
             model.set_input(data)  # unpack data from dataset and apply preprocessing
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
@@ -102,11 +111,6 @@ def main():
                 print(opt.name)  # it's useful to occasionally show the experiment name on console
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
-
-            # evaluate model performance every evaluation_freq iterations
-            if total_iters % opt.evaluation_freq == 0:
-                evaulate_model(dataset_val, model, total_iters, writer, opt.num_validation_samples)
-            iter_data_time = time.time()
 
         if epoch % opt.save_epoch_freq == 0:  # cache our model every <save_epoch_freq> epochs
             print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
@@ -136,7 +140,7 @@ def display_results(data, epoch, model, opt, total_iters, visualizer, writer):
         model.log_mt_tensorboard(model.real_A, model.real_B, model.fake_B, writer, global_step=total_iters, mode='train')
 
 
-def evaulate_model(dataset_val, model, total_iters, writer, num_validation_samples):
+def evaulate_model(dataset_val, model: BaseModel, total_iters, writer, num_validation_samples, save_volume: bool, checkpoint_path: str):
     print('evaluating model on labeled data')
     losses_total = []
     keys = []
@@ -165,6 +169,12 @@ def evaulate_model(dataset_val, model, total_iters, writer, num_validation_sampl
                 model.compute_gt_dice()
                 model.log_mt_tensorboard(model.real_A, model.real_B, model.fake_B, writer=writer,
                                          global_step=total_iters, use_image_name=False, mode=f'val-{model.patient}')
+            if save_volume:
+                os.makedirs(os.path.join(checkpoint_path, 'vol'), exist_ok=True)
+                img = torchio.ScalarImage(tensor=model.fake_B[0, ...].detach().cpu())
+                # img = sitk.GetImageFromArray(model.fake_B[0, ...].squeeze().permute(1, 0, 2).detach().cpu())
+                img.save(os.path.join(checkpoint_path, f'vol/{model.patient[0]}.nii'))
+                # sitk.WriteImage(img, os.path.join(checkpoint_path, f'vol/{model.patient[0]}.nii'))
             model.log_tensorboard(writer=writer, losses=None, global_step=total_iters, save_gif=False,
                                   use_image_name=True, mode=f'val-')
         keys = losses.keys()
