@@ -228,6 +228,8 @@ class VolumeDataset(BaseDataset):
             'B_paths': sample + "/trus_cut.mhd",
             'A_landmark': landmarks_a,
             'B_landmark': landmarks_b,
+            'modality_A': 'MR',
+            'modality_B': 'US'
         }
         if self.load_mask:
             dict_['A_mask'] = transformed_['mr_tree'].data[:, :self.input_size[0], :self.input_size[1],

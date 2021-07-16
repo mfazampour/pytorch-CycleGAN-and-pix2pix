@@ -170,6 +170,8 @@ class BiobankDataset(VolumeDataset):
             'Patient': f'{self.t1_names[index].split("/")[-2]}, {self.t2_names[index_t2].split("/")[-2]}',
             'A_paths': self.t1_names[index],
             'B_paths': self.t2_names[index_t2],
+            'modality_A': 'T1',
+            'modality_B': 'FLAIR'
         }
         if self.load_mask:
             dict_['A_mask'] = transformed_['seg_t1'].data[:, :self.input_size[0], :self.input_size[1],
