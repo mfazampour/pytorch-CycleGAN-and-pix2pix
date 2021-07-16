@@ -28,6 +28,7 @@ class SegmentationModel(BaseModel):
         parser.set_defaults(norm='batch', dataset_mode='volume')
         parser.add_argument('--netSeg', type=str, default='unet_small', help='Type of network used for registration')
         parser.add_argument('--num-classes', type=int, default=2, help='num of classes for segmentation')
+        parser.add_argument('--use_image_B', action='store_true', help='segment on image B instead of A')
         if is_train:
             pass
         return parser
@@ -46,6 +47,7 @@ class SegmentationModel(BaseModel):
         self.loss_names = ['G']
         self.visual_names = []  #'data_A', 'mask_A', 'seg_A']
         self.model_names = ['G']
+        self.loss_functions = ['loss_fn']
         self.netG = networks3d.define_G(opt.input_nc, opt.num_classes, opt.ngf,
                                         opt.netSeg, opt.norm, use_dropout=not opt.no_dropout,
                                         gpu_ids=self.gpu_ids, is_seg_net=True)
@@ -62,9 +64,16 @@ class SegmentationModel(BaseModel):
         Parameters:
             input: a dictionary that contains the data itself and its metadata information.
         """
-        self.data_A = input['A'].to(self.device)
-        self.mask_A = input['A_mask'].to(self.device).type(self.data_A.dtype)
-        self.image_paths = input['A_paths']
+        if self.opt.use_image_B:
+            self.data_A = input['B'].to(self.device)
+            if 'B_mask' in input:
+                self.mask_A = input['B_mask'].to(self.device).type(self.data_A.dtype)
+            self.image_paths = input['B_paths']
+        else:
+            self.data_A = input['A'].to(self.device)
+            self.mask_A = input['A_mask'].to(self.device).type(self.data_A.dtype)
+            self.image_paths = input['A_paths']
+        self.patient = input['Patient']
 
     def forward(self):
         """Run forward pass. This will be called by both functions <optimize_parameters> and <test>."""
@@ -72,22 +81,23 @@ class SegmentationModel(BaseModel):
         if not self.isTrain:
             self.seg_A = torch.argmax(self.seg_A, dim=1, keepdim=True)
 
-    def backward(self):
+    def loss_fn(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
         self.loss_G = self.criterionSeg(self.seg_A, self.mask_A)
-        self.loss_G.backward()
 
     def optimize_parameters(self):
         """Update network weights; it will be called in every training iteration."""
         self.forward()               # first call forward to calculate intermediate results
         self.optimizer.zero_grad()   # clear network G's existing gradients
-        self.backward()              # calculate gradients for network G
+        self.loss_fn()              # calculate gradients for network G
+        self.loss_G.backward()
         self.optimizer.step()        # update gradients for network G
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
                         save_gif=True, use_image_name=False, mode=''):
-        for key in losses:
-            writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
+        if losses is not None:
+            for key in losses:
+                writer.add_scalar(f'losses/{key}', scalar_value=losses[key], global_step=global_step)
         seg_A = torch.argmax(self.seg_A, dim=1, keepdim=True)
         axs, fig = tensorboard.init_figure(3, 4)
         tensorboard.set_axs_attribute(axs)
@@ -106,4 +116,8 @@ class SegmentationModel(BaseModel):
         overlay[overlay > 1] = 1
         tensorboard.fill_subplots(overlay.cpu(), axs=axs[3, :], img_name='Input mask overlay', cmap=None)
 
-        writer.add_figure(tag='Segmentation', figure=fig, global_step=global_step)
+        if use_image_name:
+            tag = mode + f'{self.patient}/Segmentation'
+        else:
+            tag = mode + '/Segmentation'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
