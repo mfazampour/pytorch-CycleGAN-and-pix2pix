@@ -72,6 +72,8 @@ class VolumeDataset(BaseDataset):
         parser.add_argument('--denoising', nargs='+', default=[],
                             help='list of possible denoising, currently [median, lee_filter]')
         parser.add_argument('--denoising_size', type=int, default=4, help='size of the denoising filter kernel')
+        parser.add_argument('--load_uncropped', action='store_true', help='load the original uncropped TRUS')
+        # parser.add_argument('--replaced_denoised', action='store_true', help='replace B with the denoised version')
         return parser
 
     def __init__(self, opt, mode=None):
@@ -122,29 +124,29 @@ class VolumeDataset(BaseDataset):
 
     @staticmethod
     def lee_filter_creator(size: int):
-        def lee_filter(img: torch.Tensor):
-            img_mean = F.conv3d(img, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
-            img_sqr_mean = F.conv3d(img ** 2, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
-            img_variance = img_sqr_mean - img_mean ** 2
-            overall_variance = torch.var(img)
-
-            img_weights = img_variance / (img_variance + overall_variance)
-            img_output = img_mean + img_weights * (img - img_mean)
-            return img_output
-
-        # def lee_filter(x: torch.Tensor):
-        #     img = x.squeeze().cpu().numpy()
-        #     img_mean = uniform_filter(img, [size]*len(img.shape))
-        #     img_sqr_mean = uniform_filter(img ** 2, [size] * len(img.shape))
+        # def lee_filter(img: torch.Tensor):
+        #     img_mean = F.conv3d(img, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
+        #     img_sqr_mean = F.conv3d(img ** 2, weight=torch.ones(size=(size, size, size)), bias=torch.tensor([0]))
         #     img_variance = img_sqr_mean - img_mean ** 2
-        #
-        #     overall_variance = variance(img)
+        #     overall_variance = torch.var(img)
         #
         #     img_weights = img_variance / (img_variance + overall_variance)
         #     img_output = img_mean + img_weights * (img - img_mean)
-        #     img = torch.tensor(img_output, device=x.device, dtype=x.dtype)
-        #     img = torch.reshape(img, x.shape)
-        #     return img
+        #     return img_output
+
+        def lee_filter(x: torch.Tensor):
+            img = x.squeeze().cpu().numpy()
+            img_mean = uniform_filter(img, [size]*len(img.shape))
+            img_sqr_mean = uniform_filter(img ** 2, [size] * len(img.shape))
+            img_variance = img_sqr_mean - img_mean ** 2
+
+            overall_variance = variance(img)
+
+            img_weights = img_variance / (img_variance + overall_variance)
+            img_output = img_mean + img_weights * (img - img_mean)
+            img = torch.tensor(img_output, device=x.device, dtype=x.dtype)
+            img = torch.reshape(img, x.shape)
+            return img
         return lee_filter
 
     def create_transforms(self):
@@ -249,19 +251,20 @@ class VolumeDataset(BaseDataset):
         # load mr and turs file if it hasn't already been loaded
         if sample not in self.subjects:
             # print(f'loading patient {sample}')
+            trus_path = sample + "/trus.mhd" if self.opt.load_uncropped else sample + "/trus_cut.mhd"
             if self.load_mask:
                 if os.path.isfile(sample + "/trus_tree.mhd"):
                     subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                              trus=torchio.ScalarImage(sample + "/trus_cut.mhd"),
+                                              trus=torchio.ScalarImage(trus_path),
                                               mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"),
                                               trus_tree=torchio.LabelMap(sample + "/trus_tree.mhd"))
                 else:
                     subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                              trus=torchio.ScalarImage(sample + "/trus_cut.mhd"),
+                                              trus=torchio.ScalarImage(trus_path),
                                               mr_tree=torchio.LabelMap(sample + "/mr_tree.mhd"))
             else:
                 subject = torchio.Subject(mr=torchio.ScalarImage(sample + "/mr.mhd"),
-                                          trus=torchio.Image(sample + "/trus_cut.mhd"))
+                                          trus=torchio.Image(trus_path))
             if self.denoising_transform is not None:
                 subject['trus'] = self.denoising_transform(subject['trus'])
             self.subjects[sample] = subject

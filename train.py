@@ -87,6 +87,7 @@ def main():
             # evaluate model performance every evaluation_freq iterations
             if total_iters % opt.evaluation_freq == 1:
                 evaulate_model(dataset_val, model, total_iters, writer, opt.num_validation_samples, opt.save_volume, opt.checkpoints_dir)
+
             iter_data_time = time.time()
 
             model.set_input(data)  # unpack data from dataset and apply preprocessing
@@ -165,8 +166,8 @@ def evaulate_model(dataset_val, model: BaseModel, total_iters, writer, num_valid
                 land_beg.append(landmarks_beg.item())
                 land_rig.append(landmarks_rig.item())
                 land_def.append(landmarks_def.item())
-                model.compute_landmark_loss()
-                model.compute_gt_dice()
+                # model.compute_landmark_loss()
+                # model.compute_gt_dice()
                 model.log_mt_tensorboard(model.real_A, model.real_B, model.fake_B, writer=writer,
                                          global_step=total_iters, use_image_name=False, mode=f'val-{model.patient}')
             if save_volume:

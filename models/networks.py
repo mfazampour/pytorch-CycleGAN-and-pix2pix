@@ -8,9 +8,15 @@ import functools
 from torch.optim import lr_scheduler
 import numpy as np
 from models.stylegan_networks import StyleGAN2Discriminator, StyleGAN2Generator, TileStyleGAN2Discriminator
-from torch._six import container_abcs
-from itertools import repeat
 
+TORCH_MAJOR = int(torch.__version__.split('.')[0])
+TORCH_MINOR = int(torch.__version__.split('.')[1])
+if TORCH_MAJOR == 1 and TORCH_MINOR < 8:
+    from torch._six import container_abcs
+else:
+    import collections.abc as container_abcs
+
+from itertools import repeat
 from util import se3
 os.environ['VXM_BACKEND'] = 'pytorch'
 #sys.path.append('/home/kixcodes/Documents/python/Multitask/pytorch-CycleGAN-and-pix2pix/')
@@ -1730,8 +1736,8 @@ class DiceLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, predict: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            if len(target.unique()) != predict.shape[1]:  # the number of classes in target doesn't match the predict
+        if len(target.unique()) != predict.shape[1]:  # the number of classes in target doesn't match the predict
+            with torch.no_grad():
                 return torch.tensor([-1.0], device=predict.device)
         if predict.shape[1] != target.shape[1]:
             target_ = target.view(target.shape[0], target.shape[1], -1)
@@ -1741,7 +1747,7 @@ class DiceLoss(nn.Module):
 
         assert predict.shape == target.shape, 'predict & target shape do not match'
         dice = BinaryDiceLoss(**self.kwargs)
-        total_loss = 0
+        total_loss = torch.tensor([0.0], requires_grad=True, device=predict.device)
         predict = F.softmax(predict, dim=1)
 
         for i in range(target.shape[1]):
@@ -1751,7 +1757,7 @@ class DiceLoss(nn.Module):
                     assert self.weight.shape[0] == target.shape[1], \
                         'Expect weight shape [{}], get[{}]'.format(target.shape[1], self.weight.shape[0])
                     dice_loss *= self.weights[i]
-                total_loss += dice_loss
+                total_loss = total_loss + dice_loss
 
         return total_loss / target.shape[1]
 ######################################################################
