@@ -31,7 +31,10 @@ def fill_subplots(img: torch.Tensor, axs: List[plt.Axes], img_name='', fontsize=
         img = (img - img.min())/(img.max() - img.min())
     elif cmap is None:  # cliping data to 0...255
         img[img < 0] = 0
-        img[img > 255] = 255
+        if img.dtype == torch.int:
+            img[img > 255] = 255
+        else:
+            img[img > 1] = 1
 
     if permute:
         img = img.permute((*range(0, len(img.shape)-3), -1, -2, -3)).flip([-3])
