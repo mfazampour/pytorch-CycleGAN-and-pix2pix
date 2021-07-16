@@ -80,6 +80,8 @@ class BaseOptions():
         parser.add_argument('--use_encoded_image', action='store_true', help='if specified, encode the real image to get the feature map')
         parser.add_argument('--label_nc', type=int, default=1, help='# of input label channels')
 
+        # train/test params
+        parser.add_argument('--save_volume', action='store_true', help='save volumes')
 
         # parameters related to StyleGAN2-based networks
         parser.add_argument('--stylegan2_G_num_downsampling',
