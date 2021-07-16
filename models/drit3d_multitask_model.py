@@ -3,6 +3,9 @@ import os
 import sys
 from collections import OrderedDict
 from typing import Tuple
+
+from matplotlib import pyplot as plt
+
 import util.util as util
 from .patchnce import PatchNCELoss
 
@@ -557,7 +560,9 @@ class DRIT3DMultiTaskModel(DRIT3dModel):
             tag = f'{self.patient}/Deformable'
         else:
             tag = 'Deformable'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
     def add_rigid_figures(self, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 4)
@@ -571,7 +576,9 @@ class DRIT3DMultiTaskModel(DRIT3dModel):
             tag = f'{self.patient}/Rigid'
         else:
             tag = 'Rigid'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
     def add_segmentation_figures(self, global_step, writer, use_image_name=False):
         axs, fig = vxm.torch.utils.init_figure(3, 7)
@@ -603,4 +610,6 @@ class DRIT3DMultiTaskModel(DRIT3dModel):
             tag = f'{self.patient}/Segmentation'
         else:
             tag = 'Segmentation'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)

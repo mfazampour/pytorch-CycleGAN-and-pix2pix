@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import torch
+from matplotlib import pyplot as plt
 from monai.visualize import img2tensorboard
 from torch.utils.tensorboard import SummaryWriter
 
@@ -52,6 +53,7 @@ class CUT3dModel(BaseModel):
                             type=util.str2bool, nargs='?', const=True, default=False,
                             help="Enforce flip-equivariance as additional regularization. It's used by FastCUT, but not CUT")
 
+        parser.add_argument('--apply_mask_on_fake', action='store_true', help='applies real img mask on fake before loss calculation')
         parser.set_defaults(pool_size=10, dataset_mode='volume')  # no image pooling
 
         opt, _ = parser.parse_known_args()
@@ -196,7 +198,9 @@ class CUT3dModel(BaseModel):
         if self.opt.pool_size > 0:
             fake = self.fake_pool.query(self.fake_B.detach())
         else:
-            fake = self.fake_B.detach()
+            fake = self.fake_B.detach().clone()
+        if self.opt.apply_mask_on_fake:
+            fake[self.real_B == self.real_B.min()] = self.real_B.min()
         # Fake; stop backprop to the generator by detaching fake_B
         pred_fake = self.netD(fake)
         self.loss_D_fake = self.criterionGAN_syn(pred_fake, False).mean()
@@ -212,7 +216,10 @@ class CUT3dModel(BaseModel):
         """Calculate GAN and NCE loss for the generator"""
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
-            pred_fake = self.netD(self.fake_B)
+            fake = self.fake_B.clone()
+            if self.opt.apply_mask_on_fake:
+                fake[self.real_B == self.real_B.min()] = self.real_B.min()
+            pred_fake = self.netD(fake)
             # The adversarial loss for the algorithm to also change the domain
             self.loss_G_GAN = self.criterionGAN_syn(pred_fake, True).mean() * self.opt.lambda_GAN
         else:
@@ -299,7 +306,9 @@ class CUT3dModel(BaseModel):
             tag = mode + f'{self.patient}/GAN'
         else:
             tag = mode + '/GAN'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
         if losses is not None:
             for key in losses:

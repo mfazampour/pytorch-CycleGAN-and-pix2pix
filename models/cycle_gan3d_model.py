@@ -5,6 +5,9 @@
 
 import torch
 import itertools
+
+from matplotlib import pyplot as plt
+
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks3d
@@ -290,7 +293,9 @@ class CycleGAN3dModel(BaseModel):
             tag = mode + f'{self.patient}/GAN'
         else:
             tag = mode + 'GAN'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
         if losses is not None:
             for key in losses:

@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import torch
+from matplotlib import pyplot as plt
 from monai.visualize import img2tensorboard
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
@@ -415,8 +416,10 @@ class CUTHD3dModel(BaseModel):
         if use_image_name:
             tag = mode + f'{self.patient}/GAN'
         else:
-            tag = mode + 'GAN'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+            tag = mode + '/GAN'
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
         if losses is not None:
             for key in losses:

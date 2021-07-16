@@ -177,6 +177,8 @@ class DRIT3dOrigModel(BaseModel):
         self.real_A = input['A'].to(self.device)
         self.real_B = input['B'].to(self.device)
         self.patient = input['Patient']
+        self.modality_A = input['modality_A']
+        self.modality_B = input['modality_B']
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -422,24 +424,27 @@ class DRIT3dOrigModel(BaseModel):
 
     def log_tensorboard(self, writer: SummaryWriter, losses: OrderedDict = None, global_step: int = 0,
                         save_gif=True, use_image_name=False, mode=''):
-        volumes = OrderedDict(mr_real=self.real_a_encoded[0:1].cpu(),
-                              mr_content=self.fake_a_random[0:1].cpu(),
-                              mr_fake=self.fake_a_encoded[0:1].cpu(),
-                              mr_reconstructed=self.fake_aa_encoded[0:1].cpu(),
-                              us_real=self.real_b_encoded[0:1].cpu(),
-                              us_content=self.fake_b_random[0:1].cpu(),
-                              us_fake=self.fake_b_encoded[0:1].cpu(),
-                              us_reconstructed=self.fake_bb_encoded[0:1].cpu())
-        axs, fig = vxm.torch.utils.init_figure(3, len(volumes.keys()))
+        volumes = [(f'{self.modality_A} real', self.real_a_encoded[0:1].cpu()),
+                   (f'{self.modality_A} content random', self.fake_a_random[0:1].cpu()),
+                   (f'{self.modality_A} fake', self.fake_a_encoded[0:1].cpu()),
+                   (f'{self.modality_A} reconstructed', self.fake_aa_encoded[0:1].cpu()),
+                   (f'{self.modality_B} real', self.real_b_encoded[0:1].cpu()),
+                   (f'{self.modality_B} content random', self.fake_b_random[0:1].cpu()),
+                   (f'{self.modality_B} fake', self.fake_b_encoded[0:1].cpu()),
+                   (f'{self.modality_B} reconstructed', self.fake_bb_encoded[0:1].cpu())]
+
+        axs, fig = vxm.torch.utils.init_figure(3, len(volumes))
         vxm.torch.utils.set_axs_attribute(axs)
-        for i, (key) in enumerate(volumes):
-            tensorboard.fill_subplots(volumes[key], axs=axs[i, :], img_name=key)
+        for i, (key, img) in enumerate(volumes):
+            tensorboard.fill_subplots(img, axs=axs[i, :], img_name=key)
         fig.suptitle(f'ID {self.patient}')
         if use_image_name:
             tag = mode + f'{self.patient}/GAN'
         else:
             tag = mode + '/GAN'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
         if losses is not None:
             for key in losses:

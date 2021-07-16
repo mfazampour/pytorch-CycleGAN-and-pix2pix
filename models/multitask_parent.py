@@ -5,6 +5,7 @@ from collections import OrderedDict
 from typing import Tuple
 
 import torch
+from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
 import util.util as util
@@ -246,6 +247,8 @@ class Multitask:
             #     torch.cat([self.mask_A, self.mask_A_deformed], dim=0), affine=affine, batchsize=2)
             self.augmented_fake, _ = affine_transform.apply_random_affine(fake_B, affine=affine[self.opt.batch_size:, ...])
             self.augmented_real, _ = affine_transform.apply_random_affine(fixed, affine=affine[:self.opt.batch_size, ...])
+            if self.mask_B is not None:
+                self.augmented_mask_B, _ = affine_transform.apply_random_affine(self.mask_B, affine=affine[:self.opt.batch_size, ...])
             # seg_ = self.netSeg(self.augmented_B)
             self.seg_B = self.netSeg(self.augmented_real)
             self.seg_fake_B = self.netSeg(self.augmented_fake)
@@ -527,7 +530,9 @@ class Multitask:
             tag = mode + f'{self.patient}/Deformable'
         else:
             tag = mode + '/Deformable'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
     def add_rigid_figures(self, mode, global_step, writer, use_image_name=False):
         axs, fig = tensorboard.init_figure(3, 4)
@@ -541,10 +546,12 @@ class Multitask:
             tag = mode + f'{self.patient}/Rigid'
         else:
             tag = mode + '/Rigid'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
     def add_segmentation_figures(self, mode, fake_B, real_B, global_step, writer, use_image_name=False):
-        n_rows = 8 if self.mask_B is not None else 7
+        n_rows = 9 if self.mask_B is not None else 7
         axs, fig = tensorboard.init_figure(3, n_rows)
         tensorboard.set_axs_attribute(axs)
         prostate_vol = self.mask_A.sum().item()/1e3
@@ -597,11 +604,33 @@ class Multitask:
             tensorboard.fill_subplots(self.mask_B.cpu(), axs=axs[idx, :], img_name=f'Mask US\nVolume: {prostate_vol:0.1f}')
             idx += 1
 
+            if self.opt.augment_segmentation:
+                mask_gt = self.augmented_mask_B.detach()
+                mask_pre = self.augmented_mask[:self.opt.batch_size, ...].detach()
+            else:
+                mask_gt = self.mask_B
+                mask_pre = self.mask_A
+            mask = seg_B_img.detach()
+            dice_score_pos = compute_meandice(mask, mask_gt, include_background=False)
+            dice_score_pre = compute_meandice(mask_pre, mask_gt, include_background=False)
+            print(f'Seg. US on GT, DSC:{dice_score_pos.item():0.2f}/{dice_score_pre.item():0.2f}')
+            overlay = mask_gt.repeat(1, 3, 1, 1, 1)
+            overlay[:, 0:1, ...] = mask
+            overlay[:, 2, ...] = 0
+            tensorboard.fill_subplots(overlay.cpu(), axs=axs[idx, :],
+                                      img_name=f'Seg. US on GT\n'
+                                               f'DSC:{dice_score_pos.item():0.2f}/{dice_score_pre.item():0.2f}',
+                                      cmap=None)
+            idx += 1
+
+
         if use_image_name:
             tag = mode + f'{self.patient}/Segmentation'
         else:
             tag = mode + '/Segmentation'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
     def add_landmark_losses(self, mode, global_step, writer, use_image_name=False):
 

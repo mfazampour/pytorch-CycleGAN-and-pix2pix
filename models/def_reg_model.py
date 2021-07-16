@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from collections import OrderedDict
 
+from matplotlib import pyplot as plt
 from monai.metrics import compute_meandice
 
 from .base_model import BaseModel
@@ -310,7 +311,9 @@ class DefRegModel(BaseModel, Multitask):
             tag = mode + f'{self.patient}/Deformable'
         else:
             tag = mode + 'Deformable'
-        writer.add_figure(tag=tag, figure=fig, global_step=global_step)
+        writer.add_figure(tag=tag, figure=fig, global_step=global_step, close=False)
+        fig.clf()
+        plt.close(fig)
 
 
 
