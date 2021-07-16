@@ -1,0 +1,87 @@
+---
+version: 1
+
+kind: experiment
+
+framework: pytorch
+
+tags:
+  - CUT3D
+  - NoFakePool
+
+build:
+  image: pytorch/pytorch:1.5-cuda10.1-cudnn7-runtime
+  build_steps:
+    - apt update
+    - apt install -y libglib2.0-0 libsm6 libxext6 libxrender-dev git
+    - pip install -r requirements.txt
+
+environment:
+  resources:
+    cpu:
+      requests: 3
+      limits: 4
+    memory:
+      requests: 20000
+      limits: 32000
+    gpu:
+      requests: 1
+      limits: 1
+  node_selector:
+    gpuMemory: "12"
+
+params:
+  n_epochs: 25
+  n_epochs_decay: 25
+  dataroot: '/thorax_abdomen/learn2reg_2021/'
+  name: "cut3d"
+  model: "cut3d"
+  netG: "resnet_cat"
+  input_nc: 1
+  output_nc: 1
+  lr_policy: "linear"
+  display_freq: 50
+  lr_decay_iters: 1
+  batch_size: 1
+  print_freq: 10
+  lr: 0.00002
+  gpu_ids: 0
+  num_threads: 3
+  epoch: 0
+  CUT_mode: CUT
+  val_fold: validation
+  train_fold: train
+  display_id: -1
+  pool_size: 1
+  dataset_mode: thorax
+
+run:
+    cmd: GEOMSTATS_BACKEND=pytorch python train.py --batch_size={{ batch_size }} \
+                                    --n_epochs={{ n_epochs }} \
+                                    --n_epochs_decay={{ n_epochs_decay }} \
+                                    --model={{ model }} \
+                                    --dataroot={{ dataroot }} \
+                                    --name={{ name }} \
+                                    --model={{ model }} \
+                                    --input_nc={{ input_nc }} \
+                                    --output_nc={{ output_nc }} \
+                                    --netG={{ netG }} \
+                                    --lr_policy={{ lr_policy }} \
+                                    --display_freq={{ display_freq }} \
+                                    --lr_decay_iters={{ lr_decay_iters }} \
+                                    --batch_size={{ batch_size }} \
+                                    --print_freq={{ print_freq }} \
+                                    --lr={{ lr }} \
+                                    --gpu_ids={{ gpu_ids }} \
+                                    --num_threads={{ num_threads }} \
+                                    --CUT_mode={{ CUT_mode }} \ 
+                                    --display_id={{ display_id }} \ 
+                                    --val_fold={{ val_fold }} \
+                                    --nce_layers "0,1,2,3" \
+                                    --load_mask true \
+                                    --pool_size {{ pool_size }} \
+                                    --dataset_mode {{ dataset_mode }} \\
+                                    --inshape 96 80 96
+#                                    --denoising_size {{ denoising_size }} \
+#                                    --denoising {{ denoising }}
+
